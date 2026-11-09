@@ -339,6 +339,10 @@
       "types": "./src/state/threadRelationships.ts",
       "default": "./src/state/threadRelationships.ts"
     },
+    "./state/code-map": {
+      "types": "./src/state/codeMap.ts",
+      "default": "./src/state/codeMap.ts"
+    },
     "./state/thread-checkpoints": {
       "types": "./src/state/threadCheckpoints.ts",
       "default": "./src/state/threadCheckpoints.ts"
