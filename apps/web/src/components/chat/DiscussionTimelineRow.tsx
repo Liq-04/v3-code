@@ -105,9 +105,7 @@ export function DiscussionTimelineRow({
         <ChatMarkdown text={item.summary} cwd={cwd} threadRef={threadRef} />
       ) : (
         <p className="text-sm text-muted-foreground">
-          {item.status === "completed" || item.status === "failed"
-            ? "No summary was written."
-            : "Writing the summary…"}
+          {item.status === "failed" ? "No summary was written." : "Writing the summary…"}
         </p>
       )}
       {lines.length > 0 ? (
