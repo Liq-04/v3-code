@@ -359,9 +359,17 @@
       "types": "./src/discussion/callPhase.ts",
       "import": "./src/discussion/callPhase.ts"
     },
+    "./discussion/speechBeats": {
+      "types": "./src/discussion/speechBeats.ts",
+      "import": "./src/discussion/speechBeats.ts"
+    },
     "./discussion/endpointer": {
       "types": "./src/discussion/endpointer.ts",
       "import": "./src/discussion/endpointer.ts"
+    },
+    "./discussion/statusLine": {
+      "types": "./src/discussion/statusLine.ts",
+      "import": "./src/discussion/statusLine.ts"
     },
     "./testing/longTempDir": {
       "types": "./src/testing/longTempDir.ts",
