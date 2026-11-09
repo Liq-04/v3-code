@@ -150,12 +150,13 @@ export const layerElevenLabs: Layer.Layer<
           writer
             .write(message)
             .pipe(Effect.mapError((cause) => new SynthError({ reason: "connect", cause })));
-        yield* write(elevenLabsOpenMessage(apiKey));
-
-        const frames = yield* Queue.unbounded<Uint8Array, SynthError | Cause.Done>();
+        // The socket is created when reading starts; a write before that waits forever.
         const reader = yield* socket.reader.pipe(
           Effect.mapError((cause) => new SynthError({ reason: "connect", cause })),
         );
+        yield* write(elevenLabsOpenMessage(apiKey));
+
+        const frames = yield* Queue.unbounded<Uint8Array, SynthError | Cause.Done>();
         yield* Effect.gen(function* () {
           while (true) {
             const chunk = yield* reader.pull;
