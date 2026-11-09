@@ -40,14 +40,12 @@ const layerTest = (numstatRuns: Ref.Ref<number>) =>
     Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
   );
 
-const makeRepository = Effect.fn("makeRepository")(function* () {
+const repositoryAt = Effect.fn("repositoryAt")(function* (cwd: string) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const git = yield* GitVcsDriver.GitVcsDriver;
-  const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "t3-project-code-map-" });
   const run = (...args: ReadonlyArray<string>) =>
     git.execute({ operation: "ProjectCodeMap.test", cwd, args });
-  yield* run("init", "-b", "main");
   const write = (relativePath: string, content: string | Uint8Array) =>
     Effect.gen(function* () {
       yield* fs.makeDirectory(path.dirname(path.join(cwd, relativePath)), { recursive: true });
@@ -73,6 +71,15 @@ const makeRepository = Effect.fn("makeRepository")(function* () {
       );
     });
   return { cwd, write, commit, run };
+});
+
+const makeRepository = Effect.fn("makeRepository")(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const repo = yield* repositoryAt(
+    yield* fs.makeTempDirectoryScoped({ prefix: "t3-project-code-map-" }),
+  );
+  yield* repo.run("init", "-b", "main");
+  return repo;
 });
 
 const lines = (count: number) => "line\n".repeat(count);
@@ -152,6 +159,44 @@ describe("ProjectCodeMap", () => {
 
       const error = yield* codeMap.snapshot(repo.cwd, "missing").pipe(Effect.flip);
       assert.strictEqual(error.failure, "base_not_found");
+    }).pipe(Effect.scoped, Effect.provide(layerTest(Ref.makeUnsafe(0)))),
+  );
+
+  it.effect("measures against the remote's branch when the local copy is behind", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const upstream = yield* makeRepository();
+      yield* upstream.write("a.ts", lines(1));
+      yield* upstream.commit("initial");
+      const cloneRoot = path.join(yield* fs.makeTempDirectoryScoped(), "clone");
+      yield* upstream.run("clone", upstream.cwd, cloneRoot);
+      const clone = yield* repositoryAt(cloneRoot);
+      yield* upstream.write("b.ts", lines(2));
+      yield* upstream.commit("lands upstream");
+      yield* clone.run("fetch", "origin");
+      yield* clone.run("checkout", "-b", "feature", "origin/main");
+      yield* clone.write("c.ts", lines(3));
+      yield* clone.commit("feature work");
+      const codeMap = yield* ProjectCodeMap.ProjectCodeMap;
+
+      for (const base of [undefined, "main", "origin/main"]) {
+        const snapshot = yield* codeMap.snapshot(clone.cwd, base);
+        assert.strictEqual(snapshot.baseRef, base ?? "main");
+        assert.strictEqual(snapshot.defaultBaseRef, "main");
+        assert.deepStrictEqual(snapshot.files.paths, ["b.ts", "a.ts"]);
+        assert.deepStrictEqual(
+          (yield* codeMap.changes(clone.cwd, base)).files.map((file) => file.path),
+          ["c.ts"],
+        );
+      }
+
+      // A branch that was never pushed has only its local ref.
+      assert.deepStrictEqual((yield* codeMap.snapshot(clone.cwd, "feature")).files.paths, [
+        "c.ts",
+        "b.ts",
+        "a.ts",
+      ]);
     }).pipe(Effect.scoped, Effect.provide(layerTest(Ref.makeUnsafe(0)))),
   );
 

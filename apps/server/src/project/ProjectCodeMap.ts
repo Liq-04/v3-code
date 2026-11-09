@@ -109,7 +109,18 @@ function parseVendoredPaths(stdout: string) {
   return vendored;
 }
 
-const shortRefName = (ref: string) => ref.replace(/^refs\/(?:heads|remotes)\//, "");
+interface BaseCandidate {
+  /** The branch name the operator sees and picks. */
+  readonly name: string;
+  readonly ref: string;
+}
+
+// The remote's copy comes first: a local branch nobody pulled gives every checkout an old
+// merge-base, and work that already landed shows up as theirs.
+const branchCandidates = (name: string, remote: string | null): ReadonlyArray<BaseCandidate> => [
+  ...(remote === null ? [] : [{ name, ref: `refs/remotes/${remote}/${name}` }]),
+  { name, ref: `refs/heads/${name}` },
+];
 
 /** @public */
 export const make = Effect.gen(function* () {
@@ -120,18 +131,18 @@ export const make = Effect.gen(function* () {
 
   const firstTree = Effect.fn("ProjectCodeMap.firstTree")(function* (
     cwd: string,
-    refs: ReadonlyArray<string>,
+    candidates: ReadonlyArray<BaseCandidate>,
   ) {
-    for (const ref of refs) {
+    for (const candidate of candidates) {
       const tree = yield* git
         .execute({
           operation: "ProjectCodeMap.resolveTree",
           cwd,
-          args: ["rev-parse", "--verify", "--quiet", `${ref}^{tree}`],
+          args: ["rev-parse", "--verify", "--quiet", `${candidate.ref}^{tree}`],
           allowNonZeroExit: true,
         })
         .pipe(Effect.mapError(gitFailed));
-      if (tree.exitCode === 0) return { ref, treeSha: tree.stdout.trim() };
+      if (tree.exitCode === 0) return { ...candidate, treeSha: tree.stdout.trim() };
     }
     return null;
   });
@@ -157,29 +168,25 @@ export const make = Effect.gen(function* () {
       remote === null
         ? null
         : yield* git.resolveDefaultBranchName(cwd, remote).pipe(Effect.mapError(gitFailed));
-    const defaultBase = yield* firstTree(cwd, [
-      ...(remote !== null && remoteDefault !== null
-        ? [`refs/heads/${remoteDefault}`, `refs/remotes/${remote}/${remoteDefault}`]
-        : []),
-      ...FALLBACK_DEFAULT_BRANCHES.map((name) => `refs/heads/${name}`),
-    ]);
+    const defaultBase = yield* firstTree(
+      cwd,
+      [...(remoteDefault === null ? [] : [remoteDefault]), ...FALLBACK_DEFAULT_BRANCHES].flatMap(
+        (name) => branchCandidates(name, remote),
+      ),
+    );
     const base =
       requested === undefined
         ? defaultBase
         : yield* firstTree(cwd, [
-            `refs/heads/${requested}`,
-            ...(remote === null ? [] : [`refs/remotes/${remote}/${requested}`]),
-            `refs/remotes/${requested}`,
+            ...branchCandidates(requested, remote),
+            { name: requested, ref: `refs/remotes/${requested}` },
           ]);
     if (base === null) {
       return yield* new ProjectCodeMapError({
         failure: requested === undefined ? "default_branch_not_found" : "base_not_found",
       });
     }
-    return {
-      ...base,
-      defaultBaseRef: defaultBase === null ? null : shortRefName(defaultBase.ref),
-    };
+    return { ...base, defaultBaseRef: defaultBase?.name ?? null };
   });
 
   const build = Effect.fn("ProjectCodeMap.build")(function* (key: CodeMapCacheKey) {
@@ -253,7 +260,7 @@ export const make = Effect.gen(function* () {
           new CodeMapCacheKey({
             cwd: workspaceRoot,
             treeSha: base.treeSha,
-            baseRef: shortRefName(base.ref),
+            baseRef: base.name,
           }),
         ),
         git.listWorktreePaths(workspaceRoot).pipe(Effect.mapError(gitFailed)),
