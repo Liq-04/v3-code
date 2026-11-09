@@ -46,6 +46,9 @@ import * as SpeechService from "./speech/SpeechService.ts";
 import * as CloudSpeech from "./speech/CloudSpeech.ts";
 import { speechHttpApiLayer } from "./speech/http.ts";
 import { speechStreamRouteLayer } from "./speech/stream.ts";
+import { discussionStreamRouteLayer } from "./discussion/stream.ts";
+import * as DiscussionService from "./discussion/DiscussionService.ts";
+import * as ElevenLabsSynth from "./discussion/ElevenLabsSynth.ts";
 import * as PullRequestProviderRegistry from "./pullRequest/PullRequestProviderRegistry.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import * as SqlitePersistence from "./persistence/Sqlite.ts";
@@ -801,6 +804,7 @@ const layerMakeRoutes = Layer.mergeAll(
     ServerHttp.layerStaticAndDevRoute,
     Ws.layer,
     speechStreamRouteLayer,
+    discussionStreamRouteLayer,
   ),
   McpHttpServer.layer.pipe(
     Layer.provide(ProviderAdapterRegistry.layerFromProviderInstanceRegistry),
@@ -832,6 +836,14 @@ const layerMakeRoutes = Layer.mergeAll(
     PeerForwarding.layer.pipe(
       Layer.provideMerge(PeerMcpClient.layer),
       Layer.provideMerge(PeerLinks.layer),
+    ),
+  ),
+  // Voice discussions, shared by the start RPC, the media socket and the MCP hang-up tool.
+  Layer.provide(
+    DiscussionService.layer.pipe(
+      Layer.provide(ElevenLabsSynth.layerElevenLabs.pipe(Layer.provide(SecretResolver.layer))),
+      Layer.provide(RuntimeLayer.layerEventSink),
+      Layer.provide(ProjectionStoreV2.layer),
     ),
   ),
   Layer.provide(

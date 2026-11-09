@@ -21,6 +21,9 @@ const now = DateTime.makeUnsafe("2026-04-20T00:00:00.000Z");
 
 const decodeOrchestrationV2TurnItemJson = Schema.decodeUnknownSync(OrchestrationV2TurnItemJson);
 const encodeOrchestrationV2TurnItemJson = Schema.encodeSync(OrchestrationV2TurnItemJson);
+const decodeOrchestrationV2TurnItemWire = Schema.decodeUnknownSync(
+  Schema.toCodecJson(OrchestrationV2TurnItem),
+);
 const decodeOrchestrationV2Subagent = Schema.decodeUnknownSync(OrchestrationV2Subagent);
 const encodeOrchestrationV2SubagentJson = Schema.encodeSync(OrchestrationV2SubagentJson);
 const decodeOrchestrationV2ProviderThreadJson = Schema.decodeUnknownSync(
@@ -222,6 +225,77 @@ describe("orchestration V2 contracts", () => {
         },
       ]),
     ).toThrow();
+  });
+
+  it("knows discussion items and markers in the stored and wire unions", () => {
+    const item = {
+      id: "item-discussion",
+      type: "discussion",
+      threadId: "thread-1",
+      runId: null,
+      nodeId: null,
+      providerThreadId: null,
+      providerTurnId: null,
+      nativeItemRef: null,
+      parentItemId: null,
+      ordinal: 1,
+      status: "completed",
+      title: null,
+      startedAt: DateTime.formatIso(now),
+      completedAt: DateTime.formatIso(now),
+      updatedAt: DateTime.formatIso(now),
+      discussionId: "discussion-1",
+      discussionStatus: "ended",
+      summary: "We agreed to split the parser.",
+    };
+    const stored = decodeOrchestrationV2TurnItemJson(item);
+    expect(encodeOrchestrationV2TurnItemJson(stored)).toEqual(item);
+    expect(decodeOrchestrationV2TurnItemWire(item)).toEqual(stored);
+
+    const decodeWireItems = Schema.decodeUnknownSync(
+      Schema.toCodecJson(Schema.Array(OrchestrationV2RpcSchemas.subscribeThread.output)),
+    );
+    const thread = {
+      createdBy: "user",
+      creationSource: "web",
+      id: "thread-1",
+      projectId: "project-1",
+      title: "Thread",
+      providerInstanceId: "codex",
+      modelSelection: { instanceId: "codex", model: "gpt-5-codex" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      activeProviderThreadId: null,
+      lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: "thread-1" },
+      forkedFrom: null,
+      createdAt: DateTime.formatIso(now),
+      updatedAt: DateTime.formatIso(now),
+      archivedAt: null,
+      deletedAt: null,
+      discussion: { id: "discussion-1", startedAt: DateTime.formatIso(now), heldBy: "Desktop" },
+    };
+    const event = (sequence: number, type: string, payload: unknown) => ({
+      kind: "event",
+      sequence,
+      event: {
+        id: `event-${sequence}`,
+        type,
+        threadId: "thread-1",
+        occurredAt: DateTime.formatIso(now),
+        payload,
+      },
+    });
+    expect(
+      decodeWireItems([
+        event(1, "thread.discussion-updated", thread),
+        event(2, "turn-item.updated", item),
+      ]),
+    ).toMatchObject([
+      { kind: "event", event: { payload: { discussion: { id: "discussion-1" } } } },
+      { kind: "event", event: { payload: { type: "discussion", discussionStatus: "ended" } } },
+    ]);
   });
 
   it("decodes persisted capability snapshots that predate runtimePolicy", () => {

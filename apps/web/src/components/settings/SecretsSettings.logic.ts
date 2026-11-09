@@ -21,6 +21,7 @@ type SecretUseSettings = Pick<
   | "easDeviceHosts"
   | "simlockDeviceHosts"
   | "cloudSpeechCredentials"
+  | "voiceSynthesis"
 >;
 
 interface SecretProviderUse {
@@ -103,5 +104,9 @@ export function secretProviderUses(
         ? [{ id: `voice:${provider}`, label: `Voice · ${CLOUD_SPEECH_LABELS[provider]}` }]
         : [];
     }),
+    ...(isSecretReference(settings.voiceSynthesis.elevenlabs) &&
+    settings.voiceSynthesis.elevenlabs.provider === providerId
+      ? [{ id: "voice-synthesis:elevenlabs", label: "Voice · ElevenLabs" }]
+      : []),
   ];
 }

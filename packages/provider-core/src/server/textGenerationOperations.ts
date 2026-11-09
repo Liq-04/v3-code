@@ -9,6 +9,7 @@ import type { ProviderTextGeneration } from "./textGeneration.ts";
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
+  buildDiscussionSummaryPrompt,
   buildPrContentPrompt,
   buildReviewGuidePrompt,
   buildThreadTitlePrompt,
@@ -168,6 +169,18 @@ export function fromRunner(name: string, run: Runner): ProviderTextGeneration {
       });
     });
 
+  const generateDiscussionSummary: ProviderTextGeneration["generateDiscussionSummary"] = Effect.fn(
+    `${name}.generateDiscussionSummary`,
+  )(function* (input) {
+    const generated = yield* run({
+      operation: "generateDiscussionSummary",
+      cwd: input.cwd,
+      modelSelection: input.modelSelection,
+      ...buildDiscussionSummaryPrompt({ transcript: input.transcript }),
+    });
+    return { summary: generated.summary.trim() };
+  });
+
   const generateReviewGuide: ProviderTextGeneration["generateReviewGuide"] = Effect.fn(
     `${name}.generateReviewGuide`,
   )(function* (input) {
@@ -187,5 +200,6 @@ export function fromRunner(name: string, run: Runner): ProviderTextGeneration {
     generateThreadTitle,
     generateReviewGuide,
     generateTranscriptionPostProcessing,
+    generateDiscussionSummary,
   } satisfies ProviderTextGeneration;
 }
