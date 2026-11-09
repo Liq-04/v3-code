@@ -1,7 +1,12 @@
-import { MessageId } from "@t3tools/contracts";
+import { MessageId, RunId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { emptySpeechBeats, type SpeechBeatsInput, stepSpeechBeats } from "./speechBeats.ts";
+import {
+  emptySpeechBeats,
+  type SpeechBeatsInput,
+  startSpeechBeats,
+  stepSpeechBeats,
+} from "./speechBeats.ts";
 
 const A = MessageId.make("message-a");
 const B = MessageId.make("message-b");
@@ -14,6 +19,12 @@ const text = (messageId: MessageId, value: string, at = 0, complete = false): Sp
   at,
 });
 const done = (messageId: MessageId, value: string, at = 0) => text(messageId, value, at, true);
+const fromRun = (
+  runId: RunId,
+  messageId: MessageId,
+  value: string,
+  complete = false,
+): SpeechBeatsInput => ({ type: "text", messageId, runId, text: value, complete, at: 0 });
 
 /** The beats each input produced, in order. */
 function run(inputs: ReadonlyArray<SpeechBeatsInput>): ReadonlyArray<ReadonlyArray<string>> {
@@ -26,6 +37,34 @@ function run(inputs: ReadonlyArray<SpeechBeatsInput>): ReadonlyArray<ReadonlyArr
 }
 
 describe("stepSpeechBeats", () => {
+  it("holds a reply already being written when the call started until the first line", () => {
+    const earlier = RunId.make("run-earlier");
+    const later = RunId.make("run-later");
+    const inputs: ReadonlyArray<SpeechBeatsInput> = [
+      fromRun(earlier, A, "I started on the composer. Then the strip."),
+      fromRun(later, B, "A typed question gets an answer. Yes"),
+      { type: "line" },
+      fromRun(
+        earlier,
+        A,
+        "I started on the composer. Then the strip. Checking the tests too.",
+        true,
+      ),
+    ];
+    let state = startSpeechBeats([earlier]);
+    const beats = inputs.map((input) => {
+      const step = stepSpeechBeats(state, input);
+      state = step.state;
+      return step.beats;
+    });
+    expect(beats).toEqual([
+      [],
+      ["A typed question gets an answer."],
+      [],
+      ["Checking the tests too."],
+    ]);
+  });
+
   it.each<[string, ReadonlyArray<SpeechBeatsInput>, ReadonlyArray<ReadonlyArray<string>>]>([
     [
       "speaks a sentence once whitespace confirms its end, and the tail when the message ends",

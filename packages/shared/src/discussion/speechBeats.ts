@@ -1,4 +1,4 @@
-import type { MessageId } from "@t3tools/contracts";
+import type { MessageId, RunId } from "@t3tools/contracts";
 
 const CODE_BEAT = "the code is in the thread";
 const FENCE = "```";
@@ -18,14 +18,22 @@ interface MessageSpeech {
 
 export interface SpeechBeats {
   readonly messages: ReadonlyMap<MessageId, MessageSpeech>;
+  /** Runs already writing when the call started. Their text predates every line until the first. */
+  readonly heldRuns: ReadonlySet<RunId>;
 }
 
-export const emptySpeechBeats: SpeechBeats = { messages: new Map() };
+export const emptySpeechBeats: SpeechBeats = { messages: new Map(), heldRuns: new Set() };
+
+/** A call started while these runs were active: nothing they wrote before the first line is spoken. */
+export function startSpeechBeats(heldRuns: Iterable<RunId>): SpeechBeats {
+  return { messages: new Map(), heldRuns: new Set(heldRuns) };
+}
 
 export type SpeechBeatsInput =
   | {
       readonly type: "text";
       readonly messageId: MessageId;
+      readonly runId?: RunId | null;
       /** The message's whole text so far. */
       readonly text: string;
       readonly complete: boolean;
@@ -56,7 +64,7 @@ export function stepSpeechBeats(state: SpeechBeats, input: SpeechBeatsInput): Sp
           lastBeatWasCode: false,
         });
       }
-      return { state: { messages }, beats: [] };
+      return { state: { messages, heldRuns: new Set() }, beats: [] };
     }
     case "tick": {
       const messages = new Map(state.messages);
@@ -66,7 +74,7 @@ export function stepSpeechBeats(state: SpeechBeats, input: SpeechBeatsInput): Sp
         messages.set(messageId, settled.message);
         beats.push(...settled.beats);
       }
-      return { state: { messages }, beats };
+      return { state: { messages, heldRuns: state.heldRuns }, beats };
     }
     case "text": {
       const previous = state.messages.get(input.messageId);
@@ -78,11 +86,24 @@ export function stepSpeechBeats(state: SpeechBeats, input: SpeechBeatsInput): Sp
         lastBeatWasCode: previous?.lastBeatWasCode ?? false,
       };
       const drained = drain(base, input.complete);
+      if (input.runId != null && state.heldRuns.has(input.runId)) {
+        const held = drained.message;
+        const consumed = Math.max(held.consumed, held.text.length - partialFenceLength(held));
+        const messages = new Map(state.messages).set(input.messageId, {
+          ...held,
+          consumed,
+          waitingSince: null,
+        });
+        return { state: { messages, heldRuns: state.heldRuns }, beats: [] };
+      }
       const settled = input.complete
         ? { message: { ...drained.message, waitingSince: null }, beats: [] }
         : settle(drained.message, input.at);
       const messages = new Map(state.messages).set(input.messageId, settled.message);
-      return { state: { messages }, beats: [...drained.beats, ...settled.beats] };
+      return {
+        state: { messages, heldRuns: state.heldRuns },
+        beats: [...drained.beats, ...settled.beats],
+      };
     }
   }
 }
