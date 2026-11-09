@@ -24,7 +24,6 @@ import { subscribeChatGptHandoff } from "./provider/CodexChatGptHandoff.ts";
 import {
   AcpRegistryOperationError,
   CommandId,
-  DiscussionStartError,
   authScopeResponse,
   AuthAccessStreamError,
   type AuthAccessStreamEvent,
@@ -129,6 +128,7 @@ import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "./secrets/SecretRequests.ts";
 import * as GuestShareService from "./guest/GuestShareService.ts";
+import * as DiscussionService from "./discussion/DiscussionService.ts";
 import {
   bufferShellLiveStream,
   coalesceShellApplicationEvents,
@@ -755,6 +755,15 @@ function shouldUseBoundedThreadSnapshot(input: {
   readonly acceptDeferredWork?: boolean;
 }): boolean {
   return input.acceptBoundedSnapshot === true;
+}
+
+/** How other devices name the one holding a call, such as "desktop" or "web · Chrome". */
+function describeClientDevice(props: Readonly<Record<string, unknown>>): string {
+  const part = (key: string) => (typeof props[key] === "string" ? props[key] : undefined);
+  return (
+    [part("surface"), part("clientBrowser") ?? part("clientOs")].filter(Boolean).join(" · ") ||
+    "this device"
+  );
 }
 
 // Keep telemetry per socket; several client types can connect simultaneously.
@@ -1449,6 +1458,7 @@ export const layerWsRpc = (
       const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
       const secretRequests = yield* SecretRequests.SecretRequests;
       const guestShares = yield* GuestShareService.GuestShareService;
+      const discussions = yield* DiscussionService.DiscussionService;
       const pullRequests = yield* PullRequestService.PullRequestService;
       const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
       const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
@@ -2372,9 +2382,15 @@ export const layerWsRpc = (
           Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
             Effect.andThen(guestShares.create(input)),
           ),
-        // Until DiscussionService lands, this environment cannot hold a call.
-        [WS_METHODS.discussionStart]: () =>
-          Effect.fail(new DiscussionStartError({ reason: "unavailable" })),
+        [WS_METHODS.discussionStart]: (input) =>
+          Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
+            Effect.andThen(
+              discussions.start({
+                threadId: input.threadId,
+                heldBy: describeClientDevice(clientAnalyticsProps),
+              }),
+            ),
+          ),
         [WS_METHODS.secretsAnswerRequest]: (input) =>
           Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
             Effect.andThen(secretRequests.answer(input)),
@@ -3531,6 +3547,7 @@ export const layer = Layer.unwrap(
     const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
     const peerLinks = yield* PeerLinks.PeerLinks;
     const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
+    const discussions = yield* DiscussionService.DiscussionService;
     const sql = yield* SqlClient.SqlClient;
     return HttpRouter.add(
       "GET",
@@ -3620,6 +3637,7 @@ export const layer = Layer.unwrap(
               ),
               Layer.provide(Layer.succeed(PeerLinks.PeerLinks, peerLinks)),
               Layer.provide(Layer.succeed(PeerLinkRequests.PeerLinkRequests, peerLinkRequests)),
+              Layer.provide(Layer.succeed(DiscussionService.DiscussionService, discussions)),
               Layer.provide(
                 SourceControlDiscovery.layer.pipe(
                   Layer.provide(
