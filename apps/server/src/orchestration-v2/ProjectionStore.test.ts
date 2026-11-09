@@ -1168,6 +1168,164 @@ it.effect("SQL shells use the latest subagent owner for duplicate provider-threa
   }).pipe(Effect.provide(layerTest)),
 );
 
+it.effect("shells name the file the latest tool touched, relative to the thread root", () =>
+  Effect.gen(function* () {
+    const store = yield* ProjectionStore.ProjectionStoreV2;
+    const threadId = yield* addRolledBackRecoveryCandidate("active-file");
+    const initial = yield* store.getThreadProjection(threadId);
+    const at = initial.updatedAt;
+    const rolledBackRun = initial.runs[0]!;
+    const worktreeThreadId = ThreadId.make("thread:active-file:worktree");
+    yield* store.apply({
+      id: EventId.make("event:active-file:worktree-thread"),
+      type: "thread.created",
+      threadId: worktreeThreadId,
+      occurredAt: at,
+      payload: {
+        ...initial.thread,
+        id: worktreeThreadId,
+        worktreePath: "/worktrees/a",
+        lineage: {
+          parentThreadId: null,
+          relationshipToParent: null,
+          rootThreadId: worktreeThreadId,
+        },
+      },
+    });
+    const runs = {
+      [threadId]: { ...rolledBackRun, id: RunId.make("run:active-file"), ordinal: 2 },
+      [worktreeThreadId]: {
+        ...rolledBackRun,
+        id: RunId.make("run:active-file:worktree"),
+        threadId: worktreeThreadId,
+        rootNodeId: NodeId.make("node:active-file:worktree"),
+      },
+    };
+    for (const id of [threadId, worktreeThreadId]) {
+      yield* store.apply({
+        id: EventId.make(`event:active-file:session:${id}`),
+        type: "provider-session.attached",
+        threadId: id,
+        driver,
+        occurredAt: at,
+        payload: {
+          id: ProviderSessionId.make(`provider-session:${id}`),
+          driver,
+          providerInstanceId,
+          status: "running",
+          cwd: "/workspace",
+          model: modelSelection.model,
+          capabilities: CodexProviderCapabilitiesV2,
+          createdAt: at,
+          updatedAt: at,
+          lastError: null,
+        },
+      });
+      const run = runs[id]!;
+      yield* store.apply({
+        id: EventId.make(`event:active-file:run:${id}`),
+        type: "run.created",
+        threadId: id,
+        runId: run.id,
+        nodeId: run.rootNodeId ?? undefined,
+        driver,
+        providerInstanceId,
+        occurredAt: at,
+        payload: { ...run, status: "running", completedAt: null },
+      });
+    }
+    let sequence = 0;
+    const updateItem = (payload: OrchestrationV2TurnItem) =>
+      store.apply({
+        id: EventId.make(`event:active-file:item:${sequence++}`),
+        type: "turn-item.updated",
+        threadId: payload.threadId,
+        runId: payload.runId ?? undefined,
+        driver,
+        occurredAt: at,
+        payload,
+      });
+    const itemOn = (id: ThreadId, ordinal: number) => {
+      const run = runs[id]!;
+      return {
+        id: TurnItemId.make(`item:active-file:${id}:${ordinal}`),
+        threadId: id,
+        runId: run.id,
+        nodeId: run.rootNodeId,
+        providerThreadId: null,
+        providerTurnId: null,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal,
+        status: "running" as const,
+        title: null,
+        startedAt: at,
+        completedAt: null,
+        updatedAt: at,
+      };
+    };
+    const read = (id: ThreadId, ordinal: number, input: unknown) =>
+      updateItem({ ...itemOn(id, ordinal), type: "dynamic_tool", toolName: "Read", input });
+    const expectActiveFile = Effect.fnUntraced(function* (
+      id: ThreadId,
+      expected: { readonly path: string; readonly op: "read" | "edit" } | undefined,
+    ) {
+      const listed = (yield* store.getShellSnapshot()).threads.find((row) => row.id === id);
+      const memory = ProjectionStore.threadShellFromProjection(
+        yield* store.getThreadProjection(id),
+      );
+      for (const shell of [yield* store.getThreadShell(id), listed, memory]) {
+        assert.deepEqual(
+          shell?.activeFile && {
+            path: shell.activeFile.path,
+            op: shell.activeFile.op,
+            at: DateTime.formatIso(shell.activeFile.at),
+          },
+          expected && { ...expected, at: DateTime.formatIso(at) },
+        );
+      }
+    });
+
+    yield* expectActiveFile(threadId, undefined);
+    yield* read(threadId, 2, { file_path: "/workspace/src/a.ts" });
+    yield* expectActiveFile(threadId, { path: "src/a.ts", op: "read" });
+    const edit = {
+      ...itemOn(threadId, 3),
+      type: "file_change" as const,
+      fileName: "/workspace/src/b.ts",
+    };
+    yield* updateItem(edit);
+    yield* expectActiveFile(threadId, { path: "src/b.ts", op: "edit" });
+    yield* updateItem({ ...edit, status: "completed", completedAt: at });
+    yield* expectActiveFile(threadId, { path: "src/b.ts", op: "edit" });
+    yield* read(threadId, 4, { file_path: "/etc/hosts" });
+    yield* expectActiveFile(threadId, undefined);
+    yield* read(threadId, 5, { path: "/workspace/src/c.ts", offset: 10 });
+    yield* expectActiveFile(threadId, { path: "src/c.ts", op: "read" });
+    yield* updateItem({
+      ...itemOn(threadId, 6),
+      type: "dynamic_tool",
+      toolName: "Bash",
+      input: { command: "ls", path: "/workspace/src" },
+    });
+    yield* expectActiveFile(threadId, { path: "src/c.ts", op: "read" });
+    yield* updateItem({
+      ...itemOn(threadId, 7),
+      runId: rolledBackRun.id,
+      nodeId: rolledBackRun.rootNodeId,
+      type: "file_change",
+      fileName: "/workspace/src/rolled-back.ts",
+    });
+    yield* expectActiveFile(threadId, { path: "src/c.ts", op: "read" });
+
+    yield* read(worktreeThreadId, 1, { file_path: "/worktrees/a/src/d.ts" });
+    yield* expectActiveFile(worktreeThreadId, { path: "src/d.ts", op: "read" });
+    yield* read(worktreeThreadId, 2, { file_path: "/workspace/src/a.ts" });
+    yield* expectActiveFile(worktreeThreadId, undefined);
+    yield* assertShellIndexCoversShells();
+  }).pipe(Effect.provide(layerTest)),
+);
+
 const addOrphanedRecoveryCandidate = Effect.fn("addOrphanedRecoveryCandidate")(function* (
   suffix: string,
 ) {

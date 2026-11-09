@@ -1,8 +1,70 @@
+import { type OrchestrationV2TurnItem, ThreadId, TurnItemId } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
-import { classifyToolActivity, dynamicToolSurface, mergeToolActivityData } from "./toolActivity.ts";
+import {
+  classifyToolActivity,
+  dynamicToolSurface,
+  isFileTouchingTurnItem,
+  mergeToolActivityData,
+  turnItemTouchedFile,
+} from "./toolActivity.ts";
 
 describe("toolActivity", () => {
+  it("names the file a turn item touches", () => {
+    const at = DateTime.makeUnsafe("2026-01-01T00:00:00Z");
+    const base = {
+      id: TurnItemId.make("item"),
+      threadId: ThreadId.make("thread"),
+      runId: null,
+      nodeId: null,
+      providerThreadId: null,
+      providerTurnId: null,
+      nativeItemRef: null,
+      parentItemId: null,
+      ordinal: 1,
+      status: "running" as const,
+      title: null,
+      startedAt: at,
+      completedAt: null,
+      updatedAt: at,
+    };
+    const read = (input: unknown): OrchestrationV2TurnItem => ({
+      ...base,
+      type: "dynamic_tool",
+      toolName: "Read",
+      input,
+    });
+    const cases: ReadonlyArray<
+      [OrchestrationV2TurnItem, ReturnType<typeof turnItemTouchedFile>, boolean]
+    > = [
+      [
+        { ...base, type: "file_change", fileName: "/repo/src/a.ts" },
+        { path: "/repo/src/a.ts", op: "edit" },
+        true,
+      ],
+      [read({ file_path: "/repo/src/b.ts" }), { path: "/repo/src/b.ts", op: "read" }, true],
+      [read({ path: "/repo/src/c.ts", offset: 10 }), { path: "/repo/src/c.ts", op: "read" }, true],
+      [read({ filePath: "/repo/src/d.ts" }), { path: "/repo/src/d.ts", op: "read" }, true],
+      [read({}), undefined, true],
+      [
+        {
+          ...base,
+          type: "dynamic_tool",
+          toolName: "Bash",
+          input: { command: "ls", path: "/repo" },
+        },
+        undefined,
+        false,
+      ],
+      [{ ...base, type: "command_execution", input: "cat /repo/src/a.ts" }, undefined, false],
+    ];
+    for (const [item, touched, touching] of cases) {
+      expect(turnItemTouchedFile(item)).toEqual(touched);
+      expect(isFileTouchingTurnItem(item)).toBe(touching);
+    }
+  });
+
   it("classifies from kind and toolName without sniffing titles", () => {
     expect(classifyToolActivity({ data: { kind: "read" } })).toBe("read");
     expect(classifyToolActivity({ data: { toolName: "Grep" } })).toBe("search");

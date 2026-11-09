@@ -1,4 +1,4 @@
-import type { ToolLifecycleItemType } from "@t3tools/contracts";
+import type { OrchestrationV2TurnItem, ToolLifecycleItemType } from "@t3tools/contracts";
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -192,6 +192,27 @@ export function collectToolFilePaths(data: unknown): string[] {
 
 function extractPrimaryPath(data: Record<string, unknown> | undefined): string | undefined {
   return collectToolFilePaths(data)[0];
+}
+
+/** Adapters name their file-read tool `Read`; SQL shell reads filter turn items on this name too. */
+export const FILE_READ_TOOL_NAME = "Read";
+
+export function isFileTouchingTurnItem(
+  item: OrchestrationV2TurnItem,
+): item is Extract<OrchestrationV2TurnItem, { readonly type: "file_change" | "dynamic_tool" }> {
+  return (
+    item.type === "file_change" ||
+    (item.type === "dynamic_tool" && item.toolName === FILE_READ_TOOL_NAME)
+  );
+}
+
+export function turnItemTouchedFile(
+  item: OrchestrationV2TurnItem,
+): { readonly path: string; readonly op: "read" | "edit" } | undefined {
+  if (!isFileTouchingTurnItem(item)) return undefined;
+  if (item.type === "file_change") return { path: item.fileName, op: "edit" };
+  const path = collectToolFilePaths(item.input)[0];
+  return path === undefined ? undefined : { path, op: "read" };
 }
 
 /** Preserve the first nonempty rawInput; later ACP updates often resend an empty object. */
