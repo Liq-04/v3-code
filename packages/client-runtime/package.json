@@ -135,6 +135,10 @@
       "types": "./src/voice-input/index.ts",
       "default": "./src/voice-input/index.ts"
     },
+    "./discussion": {
+      "types": "./src/discussion/index.ts",
+      "default": "./src/discussion/index.ts"
+    },
     "./t3ToolSummary": {
       "types": "./src/t3ToolSummary.ts",
       "default": "./src/t3ToolSummary.ts"

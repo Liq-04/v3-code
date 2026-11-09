@@ -1,5 +1,6 @@
 import type {
   OrchestrationV2ThreadLinkMetadata,
+  DiscussionId,
   GuestShareId,
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
@@ -140,6 +141,12 @@ import {
   decideGuestShareCommand,
   type GuestShareCommand,
 } from "./GuestShareDecider.ts";
+import {
+  closeLiveDiscussion,
+  decideDiscussionCommand,
+  type DiscussionCommand,
+  type DiscussionDecision,
+} from "./DiscussionDecider.ts";
 import * as EffectOutbox from "./EffectOutbox.ts";
 import { withCommandMetrics } from "../observability/Metrics.ts";
 import type { OrchestrationEffectRequestV2, PendingOrchestrationEffectV2 } from "./EffectOutbox.ts";
@@ -563,6 +570,9 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.guest-share.close":
     case "thread.guest-message.submit":
     case "thread.guest-message.dismiss":
+    case "thread.discussion.start":
+    case "thread.discussion.end":
+    case "thread.discussion.summary.record":
     case "thread.settle":
     case "thread.auto-settle":
     case "thread.unsettle":
@@ -655,6 +665,19 @@ function pendingThreadTitleGenerationEffect(
     commandId,
     threadId,
     request: { type: "thread-title.generate", kind },
+  };
+}
+
+function pendingDiscussionSummaryEffect(
+  commandId: CommandId,
+  threadId: ThreadId,
+  discussionId: DiscussionId,
+): PendingOrchestrationEffectV2 {
+  return {
+    id: `effect:${commandId}:discussion-summary.generate`,
+    commandId,
+    threadId,
+    request: { type: "discussion-summary.generate", discussionId },
   };
 }
 
@@ -3297,6 +3320,82 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     yield* releaseGuestAttachments(command, thread.guestShare, decided.success.guestShare, effects);
   });
 
+  // The call's item, and its summary effect once it ended. The marker is the caller's thread event.
+  const emitDiscussionItem = Effect.fn("orchestrationV2.dispatch.discussionItem")(function* (
+    command: OrchestrationV2ServerCommand & { readonly threadId: ThreadId },
+    decision: DiscussionDecision,
+    now: DateTime.Utc,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
+  ) {
+    const item = decision.item;
+    if (item === null) return;
+    yield* emit(
+      events,
+      command,
+    )({
+      type: "turn-item.updated",
+      threadId: command.threadId,
+      ...(item.runId === null ? {} : { runId: item.runId }),
+      providerInstanceId: decision.thread.providerInstanceId,
+      occurredAt: now,
+      payload: item,
+    });
+    if (!decision.summarize) return;
+    yield* Ref.update(effects, (existing) => [
+      ...existing,
+      pendingDiscussionSummaryEffect(command.commandId, command.threadId, item.discussionId),
+    ]);
+  });
+
+  const dispatchDiscussion = Effect.fn("orchestrationV2.dispatch.discussion")(function* (
+    command: DiscussionCommand,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
+  ) {
+    const projection = yield* projectionStore
+      .getThreadRecords(command.threadId, ["runs", "turnItems"], {
+        turnItemTypes: ["discussion"],
+      })
+      .pipe(
+        Effect.mapError(
+          (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+        ),
+      );
+    const thread = projection.thread;
+    const now = yield* DateTime.now;
+    const decided =
+      thread.deletedAt !== null
+        ? Result.fail(`Thread ${command.threadId} is deleted.`)
+        : decideDiscussionCommand({
+            thread,
+            runs: projection.runs,
+            items: projection.turnItems,
+            command,
+            now,
+          });
+    if (Result.isFailure(decided)) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: decided.failure,
+      });
+    }
+    if (decided.success.thread !== thread) {
+      yield* emit(
+        events,
+        command,
+      )({
+        type: "thread.discussion-updated",
+        threadId: command.threadId,
+        providerInstanceId: thread.providerInstanceId,
+        occurredAt: now,
+        payload: decided.success.thread,
+      });
+    }
+    yield* emitDiscussionItem(command, decided.success, now, events, effects);
+  });
+
   // Emitted before the message so the send and the status change commit together, and so
   // `dispatchMessage`, which reads pending events, keeps the updated share.
   const emitGuestMessageSent = Effect.fn("orchestrationV2.dispatch.guestMessageSent")(function* (
@@ -3792,6 +3891,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             archivedAt: now,
             titleRegeneration: null,
             guestShare: null,
+            discussion: null,
             pullRequests: thread.pullRequests?.map((link) => withPullRequestWatch(link, undefined)),
             updatedAt: now,
           };
@@ -4317,6 +4417,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     });
     // Archiving ends the guest share, so its waiting files go too.
     yield* releaseGuestAttachments(command, thread.guestShare, updatedThread.guestShare, effects);
+    // And it hangs up a live call, whose summary still lands in the archived thread.
+    if (command.type === "thread.archive" && thread.discussion) {
+      const { turnItems } = yield* loadProjectionForCommand(command, ["turnItems"], {
+        turnItemTypes: ["discussion"],
+      });
+      const closed = closeLiveDiscussion({ thread, items: turnItems, now });
+      if (closed !== null) yield* emitDiscussionItem(command, closed, now, events, effects);
+    }
 
     if (command.type === "thread.metadata.update" && command.regenerateTitle === true) {
       yield* Ref.update(effects, (existing) => [
@@ -13478,14 +13586,19 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           deletion: typeof command,
         ) {
           const projection = yield* projectionStore
-            .getThreadRecords(deletion.threadId, [
-              "runs",
-              "attempts",
-              "nodes",
-              "runtimeRequests",
-              "subagents",
-              "providerSessions",
-            ])
+            .getThreadRecords(
+              deletion.threadId,
+              [
+                "runs",
+                "attempts",
+                "nodes",
+                "runtimeRequests",
+                "subagents",
+                "providerSessions",
+                "turnItems",
+              ],
+              { turnItemTypes: ["discussion"] },
+            )
             .pipe(
               Effect.mapError(
                 (cause) => new OrchestratorProjectionError({ threadId: deletion.threadId, cause }),
@@ -13567,6 +13680,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "thread.guest-message.submit":
       case "thread.guest-message.dismiss":
         yield* dispatchGuestShare(command, events, effects);
+        break;
+      case "thread.discussion.start":
+      case "thread.discussion.end":
+      case "thread.discussion.summary.record":
+        yield* dispatchDiscussion(command, events, effects);
         break;
       case "provider-session.detach":
         yield* dispatchProviderSessionDetach(command, events, effects);
@@ -13919,6 +14037,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           command.type === "subagent.stop" ||
           // Closing a share again, or after it ended, is not an error.
           command.type === "thread.guest-share.close" ||
+          // Nor is ending a call that is over, or recording a summary it already has.
+          command.type === "thread.discussion.end" ||
+          command.type === "thread.discussion.summary.record" ||
           (command.type === "thread.delete" && command.onlyIfUnused === true),
         (_planned) =>
           new OrchestratorDispatchError({

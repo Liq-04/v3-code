@@ -51,6 +51,7 @@ import * as ProviderInstanceRegistry from "../../provider/ProviderInstanceRegist
 import * as ProviderRuntimeRecoveryService from "../ProviderRuntimeRecoveryService.ts";
 import * as ProviderSessionManager from "../ProviderSessionManager.ts";
 import * as CommandOutputRecorder from "./CommandOutputRecorder.ts";
+import * as LiveAssistantTextHub from "../LiveAssistantTextHub.ts";
 import * as ProviderSwitchService from "../ProviderSwitchService.ts";
 import * as ProviderTurnControlService from "../ProviderTurnControlService.ts";
 import * as ProviderTurnStartService from "../ProviderTurnStartService.ts";
@@ -60,6 +61,7 @@ import * as PreviewAgentActivity from "../../preview/PreviewAgentActivity.ts";
 import * as RunExecutionService from "../RunExecutionService.ts";
 import * as RunFinalizationService from "../RunFinalizationService.ts";
 import * as ThreadTitleRegenerationService from "../ThreadTitleRegenerationService.ts";
+import * as DiscussionSummaryService from "../../discussion/DiscussionSummaryService.ts";
 import * as RuntimePolicy from "../RuntimePolicy.ts";
 import * as TurnItemPositionStore from "../TurnItemPositionStore.ts";
 import * as RuntimeRequestService from "../RuntimeRequestService.ts";
@@ -387,6 +389,7 @@ export function layerWithRegistry<Error>(
     Layer.provide(
       Layer.mergeAll(
         layerCommandOutputHubProvided,
+        LiveAssistantTextHub.layer,
         layerProvidedRegistry,
         layerEventSinkProvided,
         IdAllocator.layer,
@@ -474,6 +477,14 @@ export function layerWithRegistry<Error>(
       }),
     }),
   );
+  const layerDiscussionSummaryTest = Layer.succeed(
+    DiscussionSummaryService.DiscussionSummaryService,
+    DiscussionSummaryService.DiscussionSummaryService.of({
+      execute: Effect.fn("DiscussionSummaryService.execute")(function () {
+        return Effect.void;
+      }),
+    }),
+  );
   const layerOrchestratorProvided = Orchestrator.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -526,6 +537,7 @@ export function layerWithRegistry<Error>(
         layerProviderTurnStartServiceProvided,
         layerRuntimeRequestServiceProvided,
         layerThreadTitleRegenerationTest,
+        layerDiscussionSummaryTest,
         layerServerSettings,
         layerThreadManagementProvided,
       ),

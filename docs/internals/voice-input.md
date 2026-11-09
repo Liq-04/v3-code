@@ -1,10 +1,16 @@
 # Voice input
 
-Transcription edits a composer draft. It does not submit an agent turn. Audio is
-temporary client input, and only normal message submission sends the resulting
-text to the agent. Mobile defaults to on-device transcription. Sending audio off
-the device requires an explicit grant naming one environment and, for cloud
-transcription, one provider.
+Dictation edits a composer draft and never submits a turn; only normal message
+submission sends the text to the agent. A voice discussion is the one exception:
+each line the user finishes on the call's media socket (`/ws/discussion`) is sent
+to the thread's agent by the server as its own turn, with the spoken text kept
+as `context.discussion` on the message. The server sets that attribution, and
+client sends that claim it are stripped, so the call's transcript can be derived
+from the thread's messages. Audio is temporary client input either way. Mobile
+defaults to on-device transcription. Sending audio off the device requires an
+explicit grant naming one environment and, for cloud transcription, one
+provider; a discussion also sends the agent's text to the voice synthesizer
+configured in server settings.
 
 The [shared controller](../../packages/client-runtime/src/voice-input/controller.ts)
 owns the operation while the client supplies capture and transcription. Preparation

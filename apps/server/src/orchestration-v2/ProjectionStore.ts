@@ -72,6 +72,7 @@ import {
   RuntimeRequestId,
   CheckpointScopeId,
   CheckpointId,
+  DiscussionId,
   ThreadId,
   TurnItemId,
   NodeId,
@@ -544,6 +545,11 @@ export interface ProjectionStoreV2Shape {
   readonly findGuestShareThreadId: (
     shareId: GuestShareId,
   ) => Effect.Effect<ThreadId | null, ProjectionStoreV2Error>;
+  /** Threads whose "on a call" marker is set, for the boot reconciler. */
+  readonly listLiveDiscussions: () => Effect.Effect<
+    ReadonlyArray<{ readonly threadId: ThreadId; readonly discussionId: DiscussionId }>,
+    ProjectionStoreV2Error
+  >;
   readonly getThread: (
     threadId: ThreadId,
   ) => Effect.Effect<OrchestrationV2AppThread, ProjectionStoreV2Error>;
@@ -857,6 +863,7 @@ export function applyToProjection(
     case "thread.model-selection-updated":
     case "thread.provider-switched":
     case "thread.guest-share-updated":
+    case "thread.discussion-updated":
       return {
         ...base,
         thread: event.payload,
@@ -2042,7 +2049,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             case "thread.interaction-mode-updated":
             case "thread.model-selection-updated":
             case "thread.provider-switched":
-            case "thread.guest-share-updated": {
+            case "thread.guest-share-updated":
+            case "thread.discussion-updated": {
               const payloadJson = yield* encodeThreadPayload(event.payload);
               const payload = parseEncodedPayload(payloadJson);
               yield* sql`
@@ -2857,7 +2865,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             event.type !== "thread.interaction-mode-updated" &&
             event.type !== "thread.model-selection-updated" &&
             event.type !== "thread.provider-switched" &&
-            event.type !== "thread.guest-share-updated"
+            event.type !== "thread.guest-share-updated" &&
+            event.type !== "thread.discussion-updated"
           ) {
             const updatedAt = yield* encodeThreadUpdatedAt(event.occurredAt);
             yield* sql`
@@ -7352,6 +7361,20 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       return rows[0] === undefined ? null : ThreadId.make(rows[0].thread_id);
     }, Effect.mapError(shellSnapshotReadError));
 
+    const listLiveDiscussions: ProjectionStoreV2Shape["listLiveDiscussions"] = Effect.fn(
+      "ProjectionStore.listLiveDiscussions",
+    )(function* () {
+      const rows = yield* sql<{ readonly thread_id: string; readonly discussion_id: string }>`
+        SELECT thread_id, json_extract(payload_json, '$.discussion.id') AS discussion_id
+        FROM orchestration_v2_projection_threads
+        WHERE json_extract(payload_json, '$.discussion.id') IS NOT NULL
+      `;
+      return rows.map((row) => ({
+        threadId: ThreadId.make(row.thread_id),
+        discussionId: DiscussionId.make(row.discussion_id),
+      }));
+    }, Effect.mapError(shellSnapshotReadError));
+
     const listOlderSettledThreads: ProjectionStoreV2Shape["listOlderSettledThreads"] = Effect.fn(
       "ProjectionStore.listOlderSettledThreads",
     )(function* ({ before, projectIds, limit }) {
@@ -7503,6 +7526,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       listOlderSettledThreads: readOnReader(listOlderSettledThreads),
       getThreadShell: readOnReader(getThreadShell),
       findGuestShareThreadId: readOnReader(findGuestShareThreadId),
+      listLiveDiscussions: readOnReader(listLiveDiscussions),
       getThread: readOnReader(getThread),
       getSettlementCandidates: readOnReader(getSettlementCandidates),
       getThreadsWithPullRequests: readOnReader(getThreadsWithPullRequests),

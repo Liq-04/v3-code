@@ -172,6 +172,7 @@ import {
   GuestShareCreateInput,
   GuestShareCreateResult,
 } from "./guestShare.ts";
+import { DiscussionStartError, DiscussionStartInput, DiscussionStartResult } from "./discussion.ts";
 import { PullRequestReviewGuideResult } from "./pullRequestReviewGuide.ts";
 import {
   PullRequestActionInput,
@@ -552,6 +553,7 @@ export const WS_METHODS = {
   scheduledTasksRotateWebhookToken: "scheduledTasks.rotateWebhookToken",
   secretsAnswerRequest: "secrets.answerRequest",
   guestShareCreate: "guestShare.create",
+  discussionStart: "discussion.start",
   scheduledTasksListWebhookDeliveries: "scheduledTasks.listWebhookDeliveries",
   scheduledTasksGetWebhookDelivery: "scheduledTasks.getWebhookDelivery",
 
@@ -2007,6 +2009,12 @@ const WsGuestShareCreateRpc = Rpc.make(WS_METHODS.guestShareCreate, {
   error: Schema.Union([GuestShareCreateError, EnvironmentAuthorizationError]),
 });
 
+const WsDiscussionStartRpc = Rpc.make(WS_METHODS.discussionStart, {
+  payload: DiscussionStartInput,
+  success: DiscussionStartResult,
+  error: Schema.Union([DiscussionStartError, EnvironmentAuthorizationError]),
+});
+
 const WsSecretsAnswerRequestRpc = Rpc.make(WS_METHODS.secretsAnswerRequest, {
   payload: SecretRequestAnswerInput,
   error: Schema.Union([SecretRequestError, EnvironmentAuthorizationError]),
@@ -2051,6 +2059,7 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
 
 export const WsRpcGroup = RpcGroup.make(
   WsGuestShareCreateRpc,
+  WsDiscussionStartRpc,
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,

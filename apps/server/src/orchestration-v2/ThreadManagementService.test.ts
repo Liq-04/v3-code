@@ -1,6 +1,7 @@
 import { expect, it } from "@effect/vitest";
 import {
   CommandId,
+  DiscussionId,
   EnvironmentId,
   MessageId,
   type OrchestrationV2Command,
@@ -74,6 +75,44 @@ it("stamps authoritative provenance on commands that create threads or messages"
   });
   expect(stamped).not.toHaveProperty("linkOrigin");
   expect(stamped).not.toHaveProperty("delegatedFrom");
+
+  // Nor attribute a line to a discussion, on a send or a queued edit.
+  const context = {
+    version: 1 as const,
+    records: [],
+    discussion: { discussionId: DiscussionId.make("discussion:forged"), spoken: "forged" },
+  };
+  const threadId = ThreadId.make("thread:thread-management:discussion");
+  const sent = ThreadManagementService.withCreationProvenance(
+    {
+      type: "message.dispatch",
+      createdBy: "user",
+      creationSource: "web",
+      commandId: CommandId.make("command:thread-management:discussion-send"),
+      threadId,
+      messageId: MessageId.make("message:thread-management:discussion"),
+      text: "hello",
+      context,
+      attachments: [],
+      dispatchMode: { type: "start_immediately" },
+    },
+    { createdBy: "user", creationSource: "web" },
+  );
+  const edited = ThreadManagementService.withCreationProvenance(
+    {
+      type: "queued-run.edit",
+      commandId: CommandId.make("command:thread-management:discussion-edit"),
+      threadId,
+      runId: RunId.make("run:thread-management:discussion"),
+      text: "hello",
+      context,
+    },
+    { createdBy: "user", creationSource: "web" },
+  );
+  for (const command of [sent, edited]) {
+    expect(command).toMatchObject({ context: { version: 1, records: [] } });
+    expect(command).not.toHaveProperty("context.discussion");
+  }
 });
 
 const layerReceiptsTest = CommandReceiptStore.layer.pipe(

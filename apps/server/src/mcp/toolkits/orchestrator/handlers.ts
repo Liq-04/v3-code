@@ -2,6 +2,7 @@ import { OrchestratorMcpFailure } from "@t3tools/contracts";
 import { OrchestratorToolkit } from "./tools.ts";
 import * as Effect from "effect/Effect";
 
+import * as DiscussionService from "../../../discussion/DiscussionService.ts";
 import * as PeerForwarding from "../../../peer/PeerForwarding.ts";
 import * as PeerLinkRequests from "../../../peer/PeerLinkRequests.ts";
 import * as PeerLinks from "../../../peer/PeerLinks.ts";
@@ -221,6 +222,26 @@ const handlers = {
         const scope = yield* McpInvocationContext.McpInvocationContext;
         const service = yield* OrchestratorMcpService.OrchestratorMcpService;
         return yield* service.interruptThread(scope, input);
+      }),
+  ),
+  t3_discussion_end: McpToolAccess.writesThreads(
+    (input) => [input.threadId],
+    (input) =>
+      Effect.gen(function* () {
+        const discussions = yield* DiscussionService.DiscussionService;
+        const status = yield* discussions
+          .end({
+            threadId: input.threadId,
+            ...(input.discussionId === undefined ? {} : { discussionId: input.discussionId }),
+            reason: "ended_by_user",
+          })
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new OrchestratorMcpFailure({ code: "orchestration_error", message: cause.message }),
+            ),
+          );
+        return { threadId: input.threadId, status };
       }),
   ),
 } satisfies McpToolAccess.Handlers<typeof OrchestratorToolkit.tools>;

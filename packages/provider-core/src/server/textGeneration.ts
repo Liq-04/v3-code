@@ -107,6 +107,21 @@ export interface TranscriptionPostProcessingResult {
   transcription: string;
 }
 
+export interface DiscussionSummaryLine {
+  readonly speaker: "user" | "agent";
+  readonly text: string;
+}
+
+export interface DiscussionSummaryGenerationInput {
+  cwd: string;
+  transcript: ReadonlyArray<DiscussionSummaryLine>;
+  modelSelection: ModelSelection;
+}
+
+export interface DiscussionSummaryGenerationResult {
+  summary: string;
+}
+
 export interface ProviderTextGeneration {
   readonly generateTranscriptionPostProcessing: (
     input: TranscriptionPostProcessingInput,
@@ -131,4 +146,8 @@ export interface ProviderTextGeneration {
   readonly generateReviewGuide: (
     input: ReviewGuideGenerationInput,
   ) => Effect.Effect<ReviewGuideGenerationResult, TextGenerationError>;
+
+  readonly generateDiscussionSummary: (
+    input: DiscussionSummaryGenerationInput,
+  ) => Effect.Effect<DiscussionSummaryGenerationResult, TextGenerationError>;
 }
