@@ -9,6 +9,7 @@ import {
   type SettingsSecretValue,
   SimlockDeviceHostConfig,
   UsageLimitSourceConfig,
+  VoiceSynthesisSettings,
   isSecretReference,
   secretSettingsFields,
 } from "@t3tools/contracts";
@@ -47,6 +48,7 @@ const providerSecretFields = new Map([
 ]);
 const usageLimitSecretFields = secretSettingsFields(UsageLimitSourceConfig);
 const voiceSecretFields = secretSettingsFields(CloudSpeechCredentials);
+const voiceSynthesisSecretFields = secretSettingsFields(VoiceSynthesisSettings);
 const easDeviceHostSecretFields = secretSettingsFields(EasDeviceHostConfig);
 const simlockDeviceHostSecretFields = secretSettingsFields(SimlockDeviceHostConfig);
 const encode = (value: string) => Buffer.from(value, "utf8").toString("base64url");
@@ -239,6 +241,11 @@ function mapSecretFieldGroups(
       voiceSecretFields,
       (provider) => `voice-cloud-${provider}`,
     ) as ServerSettings["cloudSpeechCredentials"],
+    voiceSynthesis: mapFields(
+      settings.voiceSynthesis,
+      voiceSynthesisSecretFields,
+      (field) => `voice-synthesis-${field}`,
+    ) as ServerSettings["voiceSynthesis"],
     providerInstances,
     sourceControlHosts,
     usageLimitSources,
