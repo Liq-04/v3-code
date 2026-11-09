@@ -371,6 +371,10 @@
       "types": "./src/discussion/statusLine.ts",
       "import": "./src/discussion/statusLine.ts"
     },
+    "./discussion/transcript": {
+      "types": "./src/discussion/transcript.ts",
+      "import": "./src/discussion/transcript.ts"
+    },
     "./testing/longTempDir": {
       "types": "./src/testing/longTempDir.ts",
       "import": "./src/testing/longTempDir.ts"
