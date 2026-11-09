@@ -117,7 +117,6 @@ function view(
     baseRef: snapshot.baseRef,
     files: snapshot.files,
     model,
-    markedPaths: model.marks.map((mark) => mark.path).sort(),
   };
 }
 
