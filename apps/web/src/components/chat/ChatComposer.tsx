@@ -116,6 +116,8 @@ import {
 import { ComposerBanner } from "./ComposerBanner";
 import { ComposerSurface } from "./ComposerSurface";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./ComposerBannerStack";
+import { ComposerDiscussionButton } from "./ComposerDiscussionButton";
+import { DiscussionCallStrip } from "./DiscussionCallStrip";
 import {
   attachmentsToReleaseOnUploadCapabilityLoss,
   composerOtherFilesForPresentation,
@@ -131,6 +133,7 @@ import {
   useAttachmentUploadStore,
 } from "../../lib/attachmentUploadQueue";
 import { attachmentUploadBlockReason } from "../../lib/attachmentUploadState";
+import { useDiscussionHeldHere } from "../../discussion/activeDiscussion";
 import { useDictationShortcut } from "../../speech/useDictationShortcut";
 import { useDictationSubmissionShortcut } from "../../speech/useDictationSubmissionShortcut";
 import { useEnvironmentSpeechInput } from "../../speech/useEnvironmentSpeechInput";
@@ -1772,7 +1775,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   };
   const readComposerSnapshotStable = useStableCallback(readComposerSnapshot);
 
+  // The call holds the microphone; during push to talk the dictation chord is its talk key.
+  const discussionHeldHere = useDiscussionHeldHere(routeThreadRef);
   const dictationDisabled =
+    discussionHeldHere ||
     !canOperateThread ||
     environmentUnavailable !== null ||
     projectSelectionRequired ||
@@ -3227,6 +3233,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       <ComposerBanner.Dock>
         <ComposerBanner.Column>
           <ComposerBannerStack items={shelfItems} />
+          {routeKind === "server" ? <DiscussionCallStrip threadRef={routeThreadRef} /> : null}
           {showComposerTopDrawer ? (
             <ComposerBanner.Attachment>
               <ComposerBanner.Root data-chat-composer-top-drawer="true" variant="info">
@@ -3456,7 +3463,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             ? "Choose a project above to start a thread"
                             : showProviderUnavailable
                               ? "Enable a provider in Settings to send a message"
-                              : (offeredPromptSuggestion ?? DEFAULT_COMPOSER_PLACEHOLDER)
+                              : discussionHeldHere
+                                ? "Type to cut in"
+                                : (offeredPromptSuggestion ?? DEFAULT_COMPOSER_PLACEHOLDER)
                     }
                     placeholderSuffix={
                       offeredPromptSuggestion !== null ? (
@@ -3611,6 +3620,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                           onCancel={() => speechInput.cancel()}
                         />
                       </>
+                    ) : null}
+                    {routeKind === "server" ? (
+                      <ComposerDiscussionButton
+                        threadRef={routeThreadRef}
+                        disabled={!canOperateThread || environmentUnavailable !== null}
+                        keybindings={keybindings}
+                      />
                     ) : null}
                     <VoiceInputSetup
                       environmentId={speechInput.transcriptionEnvironmentId}
