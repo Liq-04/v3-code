@@ -47,6 +47,8 @@ function thread(
     running?: boolean;
     finished?: boolean;
     archived?: boolean;
+    subagentOf?: string;
+    root?: string;
     active?: { path: string; op: "read" | "edit" };
   } = {},
 ): CodeMapThreadInput {
@@ -56,6 +58,11 @@ function thread(
     worktreePath: opts.worktree ?? null,
     archivedAt: opts.archived ? "2026-06-01T00:00:00.000Z" : null,
     deletedAt: null,
+    lineage: {
+      parentThreadId: opts.subagentOf ? ThreadId.make(opts.subagentOf) : null,
+      relationshipToParent: opts.subagentOf ? "subagent" : null,
+      rootThreadId: ThreadId.make(opts.root ?? opts.subagentOf ?? id),
+    },
     hasActionableProposedPlan: false,
     hasPendingApprovals: false,
     hasPendingUserInput: false,
@@ -115,7 +122,16 @@ describe("deriveCodeMap", () => {
       },
     ]);
     expect(model.overlaps).toEqual([]);
-    expect(model.sprites).toEqual([{ threadId: "a", path: ORCH, op: "edit" }]);
+    expect(model.sprites).toEqual([
+      {
+        threadId: "a",
+        kind: "agent",
+        parentThreadId: null,
+        colorThreadId: "a",
+        path: ORCH,
+        op: "edit",
+      },
+    ]);
   });
 
   it("lists every snapshot folder with its listed files, and root files under the empty path", () => {
@@ -204,7 +220,16 @@ describe("deriveCodeMap", () => {
 
   it("gives a running thread whose activeFile is absent a sprite with no new position", () => {
     const model = derive([thread("a", { worktree: "/wt/a", running: true })], {});
-    expect(model.sprites).toEqual([{ threadId: "a", path: null, op: null }]);
+    expect(model.sprites).toEqual([
+      {
+        threadId: "a",
+        kind: "agent",
+        parentThreadId: null,
+        colorThreadId: "a",
+        path: null,
+        op: null,
+      },
+    ]);
   });
 
   it("skips archived threads and idle threads whose root has no changes", () => {
@@ -217,6 +242,96 @@ describe("deriveCodeMap", () => {
     );
     expect(model.threads).toEqual([]);
     expect(model.marks).toEqual([]);
+  });
+});
+
+describe("subagents", () => {
+  const sub = (id: string, parent: string, opts: Parameters<typeof thread>[1] = {}) =>
+    thread(id, { subagentOf: parent, ...opts });
+
+  it.each([
+    {
+      name: "a running subagent is a small sprite in the root's colour",
+      threads: [
+        thread("a", { worktree: "/wt/a", running: true }),
+        sub("s", "a", { running: true, active: { path: ORCH, op: "read" } }),
+      ],
+      expected: [
+        {
+          threadId: "s",
+          kind: "subagent",
+          parentThreadId: "a",
+          colorThreadId: "a",
+          path: ORCH,
+          op: "read",
+        },
+      ],
+    },
+    {
+      name: "a finished subagent has no sprite",
+      threads: [
+        thread("a", { worktree: "/wt/a", running: true }),
+        sub("s", "a", { finished: true }),
+      ],
+      expected: [],
+    },
+    {
+      name: "a subagent of a subagent takes the root's colour",
+      threads: [
+        thread("a", { worktree: "/wt/a", running: true }),
+        sub("s", "a", { running: true }),
+        sub("t", "s", { running: true, root: "a" }),
+      ],
+      expected: [
+        {
+          threadId: "s",
+          kind: "subagent",
+          parentThreadId: "a",
+          colorThreadId: "a",
+          path: null,
+          op: null,
+        },
+        {
+          threadId: "t",
+          kind: "subagent",
+          parentThreadId: "a",
+          colorThreadId: "a",
+          path: null,
+          op: null,
+        },
+      ],
+    },
+    {
+      name: "a subagent of an archived root has no sprite",
+      threads: [
+        thread("a", { worktree: "/wt/a", archived: true }),
+        sub("s", "a", { running: true }),
+      ],
+      expected: [],
+    },
+    {
+      name: "a subagent whose root is not in the list has no sprite",
+      threads: [sub("s", "gone", { running: true })],
+      expected: [],
+    },
+  ])("$name", ({ threads, expected }) => {
+    expect(derive(threads, {}).sprites.filter((sprite) => sprite.kind === "subagent")).toEqual(
+      expected,
+    );
+  });
+
+  it("adds no thread, mark set, or overlap of its own", () => {
+    const threads = [
+      thread("a", { worktree: "/wt/a", running: true }),
+      sub("s", "a", { running: true, worktree: "/wt/a" }),
+    ];
+    const model = derive(threads, { "/wt/a": [change(ORCH)] });
+    expect(model.threads.map((t) => t.threadId)).toEqual(ids("a"));
+    expect(model.marks[0]!.sets).toEqual([
+      { root: "/wt/a", threadIds: ids("a"), insertions: 3, deletions: 1 },
+    ]);
+    expect(model.overlaps).toEqual([]);
+    expect(threadOverlaps(model, ThreadId.make("s"))).toEqual([]);
   });
 });
 
