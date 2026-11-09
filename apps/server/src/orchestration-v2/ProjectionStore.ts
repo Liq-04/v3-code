@@ -87,6 +87,12 @@ import {
   deriveBlockedOnThreadWait,
   derivePendingBackgroundWork,
 } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
+import { workspaceRelativeFilePath } from "@t3tools/shared/path";
+import {
+  FILE_READ_TOOL_NAME,
+  isFileTouchingTurnItem,
+  turnItemTouchedFile,
+} from "@t3tools/shared/toolActivity";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -1041,6 +1047,8 @@ type ShellThreadRow = {
   readonly activity_run_status: string | null;
   readonly activity_run_started_at: string | null;
   readonly last_error: string | null;
+  readonly session_cwd: string | null;
+  readonly active_file_item_payload_json: string | null;
   readonly terminal_failure_payload_json: string | null;
   readonly blocking_run_id: string | null;
   readonly blocking_run_requested_at: string | null;
@@ -1544,6 +1552,17 @@ const linkCardStillAsks = (
   latestUserAuthoredMessageAt === null ||
   !DateTime.isGreaterThan(latestUserAuthoredMessageAt, item.startedAt ?? item.updatedAt);
 
+function threadActiveFile(
+  item: OrchestrationV2TurnItem | undefined,
+  root: string | null,
+): OrchestrationV2ThreadShell["activeFile"] {
+  if (item === undefined) return undefined;
+  const touched = turnItemTouchedFile(item);
+  if (touched === undefined) return undefined;
+  const path = workspaceRelativeFilePath(touched.path, root);
+  return path === null ? undefined : { path, op: touched.op, at: item.startedAt ?? item.updatedAt };
+}
+
 export function threadShellFromProjection(
   projection: OrchestrationV2ThreadProjection,
 ): OrchestrationV2ThreadShell {
@@ -1619,6 +1638,11 @@ export function threadShellFromProjection(
     runs,
     pullRequests: projection.thread.pullRequests,
   });
+  const localTurnItems = activeLocalTurnItems(projection);
+  const activeFile = threadActiveFile(
+    localTurnItems.findLast((row) => isFileTouchingTurnItem(row.item))?.item,
+    projection.thread.worktreePath ?? providerSession?.cwd ?? null,
+  );
   return {
     createdBy: projection.thread.createdBy,
     creationSource: projection.thread.creationSource,
@@ -1683,6 +1707,7 @@ export function threadShellFromProjection(
       (plan) => plan.kind === "proposed_plan" && plan.status === "active",
     ),
     pendingBackgroundTasks: [...pendingBackgroundTasks],
+    ...(activeFile === undefined ? {} : { activeFile }),
     providerInstanceHistory: providerInstanceHistoryForShell({
       threadId: projection.thread.id,
       providerThreads: projection.providerThreads,
@@ -1691,7 +1716,7 @@ export function threadShellFromProjection(
       projection.providerThreads,
       projection.thread.activeProviderThreadId,
     ),
-    itemCount: activeLocalTurnItems(projection).length,
+    itemCount: localTurnItems.length,
     visibleItemCount: projection.visibleTurnItems.length,
     createdAt: projection.thread.createdAt,
     updatedAt: projection.thread.updatedAt,
@@ -1792,6 +1817,7 @@ type ShellThreadState = {
   readonly latestUserAuthoredMessageAt: DateTime.Utc | null;
   readonly hasActionableProposedPlan: boolean;
   readonly pendingBackgroundTasks: OrchestrationV2ThreadShell["pendingBackgroundTasks"];
+  readonly activeFile: OrchestrationV2ThreadShell["activeFile"];
   readonly providerInstanceHistory: OrchestrationV2ThreadShell["providerInstanceHistory"];
   readonly goal: OrchestrationV2ThreadShell["goal"];
   readonly itemCount: number;
@@ -1955,6 +1981,7 @@ function shellFromState(input: {
     latestUserAuthoredMessageAt: input.state.latestUserAuthoredMessageAt,
     hasActionableProposedPlan: input.state.hasActionableProposedPlan,
     pendingBackgroundTasks: input.state.pendingBackgroundTasks,
+    ...(input.state.activeFile === undefined ? {} : { activeFile: input.state.activeFile }),
     providerInstanceHistory: input.state.providerInstanceHistory,
     goal: input.state.goal,
     itemCount: input.state.itemCount,
@@ -6270,6 +6297,38 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 LIMIT 1
               ) AS last_error,
               (
+                SELECT json_extract(session.payload_json, '$.cwd')
+                FROM orchestration_v2_projection_provider_session_bindings binding
+                CROSS JOIN orchestration_v2_projection_provider_sessions session
+                  ON session.provider_session_id = binding.provider_session_id
+                WHERE binding.thread_id = t.thread_id
+                  AND session.provider_instance_id = t.provider_instance_id
+                ORDER BY session.updated_at DESC, session.provider_session_id DESC
+                LIMIT 1
+              ) AS session_cwd,
+              (
+                -- Mirrors isFileTouchingTurnItem over visible items; rolled-back runs are hidden.
+                SELECT touched.payload_json
+                FROM orchestration_v2_projection_turn_items touched
+                  INDEXED BY orchestration_v2_projection_turn_items_thread_ordinal_idx
+                LEFT JOIN orchestration_v2_projection_runs r ON r.run_id = touched.run_id
+                WHERE touched.thread_id = t.thread_id
+                  AND (
+                    touched.type = 'file_change'
+                    OR (
+                      touched.type = 'dynamic_tool'
+                      AND json_extract(touched.payload_json, '$.toolName') = ${FILE_READ_TOOL_NAME}
+                    )
+                    OR (
+                      touched.type = 'command_execution'
+                      AND json_array_length(touched.payload_json, '$.readPaths') > 0
+                    )
+                  )
+                  AND (touched.run_id IS NULL OR r.status <> 'rolled_back')
+                ORDER BY touched.ordinal DESC, touched.turn_item_id DESC
+                LIMIT 1
+              ) AS active_file_item_payload_json,
+              (
                 SELECT item.payload_json
                 FROM orchestration_v2_projection_turn_items item
                 INNER JOIN orchestration_v2_projection_runs r ON r.run_id = item.run_id
@@ -6812,6 +6871,12 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           pendingTurnItemsByThreadId,
         } = input;
         const thread = yield* decodeThreadPayload(row.payload_json);
+        const activeFile = threadActiveFile(
+          row.active_file_item_payload_json === null
+            ? undefined
+            : yield* decodeTurnItemPayload(row.active_file_item_payload_json),
+          thread.worktreePath ?? row.session_cwd,
+        );
         const latestUserAuthoredMessageAt =
           row.latest_user_authored_message_at === null
             ? null
@@ -6957,6 +7022,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           latestUserAuthoredMessageAt,
           hasActionableProposedPlan: row.has_actionable_proposed_plan === 1,
           pendingBackgroundTasks,
+          activeFile,
           providerInstanceHistory: providerInstanceHistoryForShell({
             threadId: thread.id,
             providerThreads: providerThreadsByThreadId.get(thread.id) ?? [],

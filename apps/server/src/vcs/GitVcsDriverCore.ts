@@ -76,6 +76,7 @@ const REVIEW_DIFF_PATCH_MAX_OUTPUT_BYTES = 120_000;
 const REVIEW_METADATA_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 // Temporary-index git add scales poorly (50k files took ~30 s); report incomplete totals above this cap.
 const REVIEW_UNTRACKED_MAX_FILES = 5_000;
+const BRANCH_CHANGE_FILES_LIMIT = 500;
 const REVIEW_DIFF_FILE_MAX_OUTPUT_BYTES = 1024 * 1024;
 const REVIEW_BRANCH_COMMIT_LIMIT = 100;
 const REVIEW_BRANCH_SUBJECT_LIMIT = 300;
@@ -3270,11 +3271,22 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     }
     let insertions = 0;
     let deletions = 0;
-    for (const file of parseReviewNumstat(result.stdout)) {
+    const files = parseReviewNumstat(result.stdout).map((file) => {
       insertions += file.additions;
       deletions += file.deletions;
-    }
-    return { baseRef, insertions, deletions };
+      return { path: file.path, insertions: file.additions, deletions: file.deletions };
+    });
+    files.sort(
+      (a, b) =>
+        b.insertions + b.deletions - (a.insertions + a.deletions) || a.path.localeCompare(b.path),
+    );
+    return {
+      baseRef,
+      insertions,
+      deletions,
+      files: files.slice(0, BRANCH_CHANGE_FILES_LIMIT),
+      filesTotal: files.length,
+    };
   }, Effect.scoped);
 
   const reviewCommitError = (cwd: string, detail: string) =>

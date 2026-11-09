@@ -6,6 +6,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { OrchestrationProjectShell } from "./orchestrationProject.ts";
 
 import {
+  ProjectCodeMapSnapshot,
   ProjectFaviconPath,
   ReceivedProjectIcon,
   StoredProjectIcon,
@@ -20,6 +21,8 @@ import {
 
 const decodeProjectCreatePayload = Schema.decodeUnknownSync(ProjectCreatePayload);
 const decodeProjectUpdatePayload = Schema.decodeUnknownSync(ProjectUpdatePayload);
+const decodeCodeMapSnapshot = Schema.decodeUnknownSync(ProjectCodeMapSnapshot);
+const encodeCodeMapSnapshot = Schema.encodeSync(ProjectCodeMapSnapshot);
 const decodeProjectMutation = Schema.decodeUnknownSync(ProjectMutation);
 
 describe("project RPC errors", () => {
@@ -177,3 +180,23 @@ effectIt.effect("an icon kind from a newer server shows the default icon", () =>
     assert.strictEqual(broken._tag, "Failure");
   }),
 );
+
+describe("ProjectCodeMapSnapshot", () => {
+  it("round-trips the columnar snapshot", () => {
+    const snapshot = {
+      treeSha: "abc123",
+      baseRef: "main",
+      files: { paths: ["src/a.ts", "logo.png"], lines: [12, 0], vendored: [false, true] },
+      folders: [{ path: "src", fileCount: 1, lines: 12 }],
+      filesTotal: 2,
+    };
+    const decoded = decodeCodeMapSnapshot(snapshot);
+    expect(encodeCodeMapSnapshot(decoded)).toEqual(snapshot);
+    expect(() =>
+      decodeCodeMapSnapshot({
+        ...snapshot,
+        files: { paths: ["a"], lines: [-1], vendored: [false] },
+      }),
+    ).toThrow();
+  });
+});
