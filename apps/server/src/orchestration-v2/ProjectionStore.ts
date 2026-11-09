@@ -87,7 +87,7 @@ import {
   deriveBlockedOnThreadWait,
   derivePendingBackgroundWork,
 } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
-import { workspaceRelativeFilePath } from "@t3tools/shared/path";
+import { isAbsolutePath, resolveWorkspaceFilePath } from "@t3tools/shared/path";
 import {
   FILE_READ_TOOL_NAME,
   isFileTouchingTurnItem,
@@ -581,6 +581,11 @@ export interface ProjectionStoreV2Shape {
   readonly getThreadTitles: (
     threadIds: ReadonlyArray<ThreadId>,
   ) => Effect.Effect<Record<ThreadId, string>, ProjectionStoreV2Error>;
+  /** Distinct absolute paths the run's read tools named, most recent first and capped. */
+  readonly getRunReadPaths: (input: {
+    readonly threadId: ThreadId;
+    readonly runId: RunId;
+  }) => Effect.Effect<ReadonlyArray<string>, ProjectionStoreV2Error>;
   readonly getThreadWorktreePaths: (options?: {
     readonly includeArchived?: boolean;
   }) => Effect.Effect<
@@ -1552,15 +1557,23 @@ const linkCardStillAsks = (
   latestUserAuthoredMessageAt === null ||
   !DateTime.isGreaterThan(latestUserAuthoredMessageAt, item.startedAt ?? item.updatedAt);
 
+const RUN_READ_PATHS_LIMIT = 500;
+
+/** The item's touched path made absolute. A relative path with no root to join stays unknown. */
+function touchedFileOf(item: OrchestrationV2TurnItem, root: string | null) {
+  const touched = turnItemTouchedFile(item);
+  if (touched === undefined) return undefined;
+  if (root === null) return isAbsolutePath(touched.path) ? touched : undefined;
+  return { path: resolveWorkspaceFilePath(touched.path, root), op: touched.op };
+}
+
 function threadActiveFile(
   item: OrchestrationV2TurnItem | undefined,
   root: string | null,
 ): OrchestrationV2ThreadShell["activeFile"] {
   if (item === undefined) return undefined;
-  const touched = turnItemTouchedFile(item);
-  if (touched === undefined) return undefined;
-  const path = workspaceRelativeFilePath(touched.path, root);
-  return path === null ? undefined : { path, op: touched.op, at: item.startedAt ?? item.updatedAt };
+  const touched = touchedFileOf(item, root);
+  return touched && { ...touched, at: item.startedAt ?? item.updatedAt };
 }
 
 export function threadShellFromProjection(
@@ -6211,6 +6224,33 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       )`;
     };
     // Mirrors isSilentRunForShell.
+    const sessionCwdOf = (alias: string) => {
+      const thread = sql.literal(alias);
+      return sql`(
+        SELECT json_extract(session.payload_json, '$.cwd')
+        FROM orchestration_v2_projection_provider_session_bindings binding
+        CROSS JOIN orchestration_v2_projection_provider_sessions session
+          ON session.provider_session_id = binding.provider_session_id
+        WHERE binding.thread_id = ${thread}.thread_id
+          AND session.provider_instance_id = ${thread}.provider_instance_id
+        ORDER BY session.updated_at DESC, session.provider_session_id DESC
+        LIMIT 1
+      )`;
+    };
+    // Mirrors the read branches of isFileTouchingTurnItem.
+    const isFileReadItem = (alias: string) => {
+      const item = sql.literal(alias);
+      return sql`(
+        (
+          ${item}.type = 'dynamic_tool'
+          AND json_extract(${item}.payload_json, '$.toolName') = ${FILE_READ_TOOL_NAME}
+        )
+        OR (
+          ${item}.type = 'command_execution'
+          AND json_array_length(${item}.payload_json, '$.readPaths') > 0
+        )
+      )`;
+    };
     const isSilentShellRun = (alias: string) => {
       const run = sql.literal(alias);
       return sql`(
@@ -6296,16 +6336,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 ORDER BY session.updated_at DESC, session.provider_session_id DESC
                 LIMIT 1
               ) AS last_error,
-              (
-                SELECT json_extract(session.payload_json, '$.cwd')
-                FROM orchestration_v2_projection_provider_session_bindings binding
-                CROSS JOIN orchestration_v2_projection_provider_sessions session
-                  ON session.provider_session_id = binding.provider_session_id
-                WHERE binding.thread_id = t.thread_id
-                  AND session.provider_instance_id = t.provider_instance_id
-                ORDER BY session.updated_at DESC, session.provider_session_id DESC
-                LIMIT 1
-              ) AS session_cwd,
+              ${sessionCwdOf("t")} AS session_cwd,
               (
                 -- Mirrors isFileTouchingTurnItem over visible items; rolled-back runs are hidden.
                 SELECT touched.payload_json
@@ -6313,17 +6344,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   INDEXED BY orchestration_v2_projection_turn_items_thread_ordinal_idx
                 LEFT JOIN orchestration_v2_projection_runs r ON r.run_id = touched.run_id
                 WHERE touched.thread_id = t.thread_id
-                  AND (
-                    touched.type = 'file_change'
-                    OR (
-                      touched.type = 'dynamic_tool'
-                      AND json_extract(touched.payload_json, '$.toolName') = ${FILE_READ_TOOL_NAME}
-                    )
-                    OR (
-                      touched.type = 'command_execution'
-                      AND json_array_length(touched.payload_json, '$.readPaths') > 0
-                    )
-                  )
+                  AND (touched.type = 'file_change' OR ${isFileReadItem("touched")})
                   AND (touched.run_id IS NULL OR r.status <> 'rolled_back')
                 ORDER BY touched.ordinal DESC, touched.turn_item_id DESC
                 LIMIT 1
@@ -7415,6 +7436,35 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       return Object.fromEntries(rows.map((row) => [row.thread_id, row.title]));
     }, Effect.mapError(shellSnapshotReadError));
 
+    const getRunReadPaths = Effect.fn("ProjectionStore.getRunReadPaths")(function* (input: {
+      readonly threadId: ThreadId;
+      readonly runId: RunId;
+    }) {
+      const threads = yield* sql<{ readonly root: string | null }>`
+        SELECT COALESCE(json_extract(t.payload_json, '$.worktreePath'), ${sessionCwdOf("t")}) AS root
+        FROM orchestration_v2_projection_threads t
+        WHERE t.thread_id = ${input.threadId}
+      `;
+      const thread = threads[0];
+      if (thread === undefined) return [];
+      const rows = yield* sql<{ readonly payload_json: string }>`
+        SELECT touched.payload_json
+        FROM orchestration_v2_projection_turn_items touched
+          INDEXED BY orchestration_v2_projection_turn_items_run_ordinal_idx
+        WHERE touched.run_id = ${input.runId}
+          AND touched.thread_id = ${input.threadId}
+          AND ${isFileReadItem("touched")}
+        ORDER BY touched.ordinal DESC
+        LIMIT ${RUN_READ_PATHS_LIMIT}
+      `;
+      const paths = new Set<string>();
+      for (const row of rows) {
+        const touched = touchedFileOf(yield* decodeTurnItemPayload(row.payload_json), thread.root);
+        if (touched !== undefined) paths.add(touched.path);
+      }
+      return [...paths];
+    }, Effect.mapError(shellSnapshotReadError));
+
     const findGuestShareThreadId = Effect.fn("ProjectionStore.findGuestShareThreadId")(function* (
       shareId: GuestShareId,
     ) {
@@ -7597,6 +7647,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getSettlementCandidates: readOnReader(getSettlementCandidates),
       getThreadsWithPullRequests: readOnReader(getThreadsWithPullRequests),
       getThreadTitles: readOnReader(getThreadTitles),
+      getRunReadPaths: readOnReader(getRunReadPaths),
       getThreadLinkMetadata: readOnReader(getThreadLinkMetadata),
       getThreadWorktreePaths: readOnReader(getThreadWorktreePaths),
       getOpenRemoteDelegatedTasks: getOpenRemoteDelegatedTasks.pipe(NodeSqliteClient.readOnly),

@@ -1168,7 +1168,7 @@ it.effect("SQL shells use the latest subagent owner for duplicate provider-threa
   }).pipe(Effect.provide(layerTest)),
 );
 
-it.effect("shells name the file the latest tool touched, relative to the thread root", () =>
+it.effect("shells name the file the latest tool touched by its absolute path", () =>
   Effect.gen(function* () {
     const store = yield* ProjectionStore.ProjectionStoreV2;
     const threadId = yield* addRolledBackRecoveryCandidate("active-file");
@@ -1288,27 +1288,27 @@ it.effect("shells name the file the latest tool touched, relative to the thread 
 
     yield* expectActiveFile(threadId, undefined);
     yield* read(threadId, 2, { file_path: "/workspace/src/a.ts" });
-    yield* expectActiveFile(threadId, { path: "src/a.ts", op: "read" });
+    yield* expectActiveFile(threadId, { path: "/workspace/src/a.ts", op: "read" });
     const edit = {
       ...itemOn(threadId, 3),
       type: "file_change" as const,
       fileName: "/workspace/src/b.ts",
     };
     yield* updateItem(edit);
-    yield* expectActiveFile(threadId, { path: "src/b.ts", op: "edit" });
+    yield* expectActiveFile(threadId, { path: "/workspace/src/b.ts", op: "edit" });
     yield* updateItem({ ...edit, status: "completed", completedAt: at });
-    yield* expectActiveFile(threadId, { path: "src/b.ts", op: "edit" });
-    yield* read(threadId, 4, { file_path: "/etc/hosts" });
-    yield* expectActiveFile(threadId, undefined);
-    yield* read(threadId, 5, { path: "/workspace/src/c.ts", offset: 10 });
-    yield* expectActiveFile(threadId, { path: "src/c.ts", op: "read" });
+    yield* expectActiveFile(threadId, { path: "/workspace/src/b.ts", op: "edit" });
+    yield* read(threadId, 4, { file_path: "/other-checkout/src/a.ts" });
+    yield* expectActiveFile(threadId, { path: "/other-checkout/src/a.ts", op: "read" });
+    yield* read(threadId, 5, { path: "src/c.ts", offset: 10 });
+    yield* expectActiveFile(threadId, { path: "/workspace/src/c.ts", op: "read" });
     yield* updateItem({
       ...itemOn(threadId, 6),
       type: "dynamic_tool",
       toolName: "Bash",
       input: { command: "ls", path: "/workspace/src" },
     });
-    yield* expectActiveFile(threadId, { path: "src/c.ts", op: "read" });
+    yield* expectActiveFile(threadId, { path: "/workspace/src/c.ts", op: "read" });
     yield* updateItem({
       ...itemOn(threadId, 6),
       id: TurnItemId.make("item:active-file:command-read"),
@@ -1317,7 +1317,7 @@ it.effect("shells name the file the latest tool touched, relative to the thread 
       input: "cat src/e.ts",
       readPaths: ["/workspace/src/e.ts"],
     });
-    yield* expectActiveFile(threadId, { path: "src/e.ts", op: "read" });
+    yield* expectActiveFile(threadId, { path: "/workspace/src/e.ts", op: "read" });
     yield* updateItem({
       ...itemOn(threadId, 6),
       id: TurnItemId.make("item:active-file:command-plain"),
@@ -1325,7 +1325,7 @@ it.effect("shells name the file the latest tool touched, relative to the thread 
       type: "command_execution",
       input: "ls src",
     });
-    yield* expectActiveFile(threadId, { path: "src/e.ts", op: "read" });
+    yield* expectActiveFile(threadId, { path: "/workspace/src/e.ts", op: "read" });
     yield* updateItem({
       ...itemOn(threadId, 9),
       runId: rolledBackRun.id,
@@ -1333,12 +1333,39 @@ it.effect("shells name the file the latest tool touched, relative to the thread 
       type: "file_change",
       fileName: "/workspace/src/rolled-back.ts",
     });
-    yield* expectActiveFile(threadId, { path: "src/e.ts", op: "read" });
+    yield* expectActiveFile(threadId, { path: "/workspace/src/e.ts", op: "read" });
+    yield* read(threadId, 10, { file_path: "/workspace/src/a.ts" });
+    yield* updateItem({
+      ...itemOn(threadId, 11),
+      runId: rolledBackRun.id,
+      nodeId: rolledBackRun.rootNodeId,
+      type: "dynamic_tool",
+      toolName: "Read",
+      input: { file_path: "/workspace/src/earlier-run.ts" },
+    });
 
-    yield* read(worktreeThreadId, 1, { file_path: "/worktrees/a/src/d.ts" });
-    yield* expectActiveFile(worktreeThreadId, { path: "src/d.ts", op: "read" });
+    // Reads only, each path once, newest first; edits and other runs stay out.
+    assert.deepEqual(yield* store.getRunReadPaths({ threadId, runId: runs[threadId]!.id }), [
+      "/workspace/src/a.ts",
+      "/workspace/src/e.ts",
+      "/workspace/src/c.ts",
+      "/other-checkout/src/a.ts",
+    ]);
+    assert.deepEqual(yield* store.getRunReadPaths({ threadId, runId: rolledBackRun.id }), [
+      "/workspace/src/earlier-run.ts",
+    ]);
+
+    yield* read(worktreeThreadId, 1, { file_path: "src/d.ts" });
+    yield* expectActiveFile(worktreeThreadId, { path: "/worktrees/a/src/d.ts", op: "read" });
     yield* read(worktreeThreadId, 2, { file_path: "/workspace/src/a.ts" });
-    yield* expectActiveFile(worktreeThreadId, undefined);
+    yield* expectActiveFile(worktreeThreadId, { path: "/workspace/src/a.ts", op: "read" });
+    assert.deepEqual(
+      yield* store.getRunReadPaths({
+        threadId: worktreeThreadId,
+        runId: runs[worktreeThreadId]!.id,
+      }),
+      ["/workspace/src/a.ts", "/worktrees/a/src/d.ts"],
+    );
     yield* assertShellIndexCoversShells();
   }).pipe(Effect.provide(layerTest)),
 );

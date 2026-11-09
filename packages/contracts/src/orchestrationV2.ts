@@ -2111,7 +2111,7 @@ export type OrchestrationV2LatestVisibleMessageSummary =
   typeof OrchestrationV2LatestVisibleMessageSummary.Type;
 
 export const OrchestrationV2ThreadActiveFile = Schema.Struct({
-  /** Relative to the thread's worktree, or to the directory its agent runs in when it has none. */
+  /** Absolute. It may sit outside the thread's own checkout, in another one or in none. */
   path: TrimmedNonEmptyString,
   op: Schema.Literals(["read", "edit"]),
   at: Schema.DateTimeUtc,
@@ -3677,6 +3677,7 @@ export const ORCHESTRATION_V2_WS_METHODS = {
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   getThreadFamily: "orchestration.getThreadFamily",
   getThreadTitles: "orchestration.getThreadTitles",
+  getRunReadPaths: "orchestration.getRunReadPaths",
   getThreadLinkMetadata: "orchestration.getThreadLinkMetadata",
   getWorktreeThreadIds: "orchestration.getWorktreeThreadIds",
   getOlderSettledThreads: "orchestration.getOlderSettledThreads",
@@ -3824,6 +3825,16 @@ export const OrchestrationV2GetThreadTitlesInput = Schema.Struct({
 
 /** Titles of the requested threads that exist, archived ones included. Deleted and unknown ids are absent. */
 export const OrchestrationV2ThreadTitles = Schema.Record(ThreadId, Schema.String);
+
+export const OrchestrationV2GetRunReadPathsInput = Schema.Struct({
+  threadId: ThreadId,
+  runId: RunId,
+});
+
+/** Distinct absolute paths the run's read tools named, capped to the most recent. */
+export const OrchestrationV2RunReadPaths = Schema.Struct({
+  paths: Schema.Array(Schema.String),
+});
 
 export const OrchestrationV2ThreadLinkMetadata = Schema.Struct({
   title: Schema.String,
@@ -4356,6 +4367,10 @@ export const OrchestrationV2RpcSchemas = {
   getThreadTitles: {
     input: OrchestrationV2GetThreadTitlesInput,
     output: OrchestrationV2ThreadTitles,
+  },
+  getRunReadPaths: {
+    input: OrchestrationV2GetRunReadPathsInput,
+    output: OrchestrationV2RunReadPaths,
   },
   getThreadLinkMetadata: {
     input: OrchestrationV2GetThreadTitlesInput,
