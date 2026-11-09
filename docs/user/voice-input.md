@@ -140,3 +140,41 @@ cleanup even when it is on, so you see what the model heard. Browser recording
 needs HTTPS or localhost and microphone permission; for a remote server over
 plain HTTP, use the desktop app. If the selected microphone is missing, choose
 another or the system default.
+
+## Talk with the agent
+
+A discussion is a voice call with a thread's own agent. You talk, it answers out
+loud in an ElevenLabs voice, and it keeps working in the thread as usual: reading,
+running commands, and editing under the thread's permissions. Each line you say is
+a real message to the agent, so it costs a turn like a typed one. When the call
+ends, one summary lands in the thread with the transcript behind it.
+
+Before the first call, open **Settings → Voice → Discussions** and add an
+ElevenLabs API key for the environment, or a [secret provider](secrets.md)
+reference. The key stays on that environment, and anyone who can start a discussion
+there uses it. **Voice ID** picks an ElevenLabs voice; leave it blank for the
+default.
+
+Start a call with the phone button in the composer, **Start discussion** in the
+command palette, or `mod+alt+shift+d`. A call strip docks above the composer with
+what the call is doing, a mute button, and **End**. You can still type while on a
+call; the composer says **Type to cut in**, and the agent answers aloud. **On a
+call** shows in the thread header on every device viewing the thread, with **End**,
+so you can hang up from a device that is not holding the audio. If the server
+restarts mid-call, the call ends without a summary; the lines you said stay in the
+thread.
+
+Choose how the microphone takes turns, in Voice settings or from the strip:
+
+- **Open mic** (the default) hears when you start and stop. Talking over the agent
+  cuts its voice off. **End of speech** sets how long a pause ends what you are
+  saying. Use headphones so the agent does not hear itself.
+- **Push to talk** listens only while you hold the dictation shortcut
+  (`mod+shift+d`) or the strip's **Hold to talk** button. Pressing it while the
+  agent speaks cuts the agent off.
+
+The call's microphone audio goes to the thread's environment, which transcribes it
+and sends the agent's replies to ElevenLabs to be spoken. Like dictation, a browser
+needs HTTPS or localhost for the microphone; for a remote server over plain HTTP,
+use the desktop app. Calls run on web and desktop; the mobile app shows a live call
+with **End**, and the summary afterwards.
