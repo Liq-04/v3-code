@@ -1991,6 +1991,12 @@ export default function ChatView(props: ChatViewProps) {
     visiblePullRequestCount,
     onDiffPanelOpen,
   });
+  const pinnedMapThreadKey = routeKind === "server" && !embedded ? routeThreadKey : null;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- arriving at a thread opens its right panel on the pinned map in the right panel store
+  useEffect(() => {
+    const ref = pinnedMapThreadKey === null ? null : parseScopedThreadKey(pinnedMapThreadKey);
+    if (ref) useRightPanelStore.getState().revealPinnedMap(ref);
+  }, [pinnedMapThreadKey]);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- consumes a pending maximize request from the right panel store once the panel can maximize
   useEffect(() => {
     if (!canMaximizeRightPanel) return;

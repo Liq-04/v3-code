@@ -25,12 +25,17 @@ import type { CodeMapView } from "~/state/codeMap";
 
 const state = vi.hoisted(() => ({ view: null as unknown as Atom.Writable<CodeMapView> }));
 
-vi.mock("~/state/codeMap", () => ({
-  codeMapViewAtom: () => state.view,
-  codeMapSnapshotAtom: () => state.view,
-}));
+vi.mock("~/state/codeMap", async () => {
+  const { Atom } = await import("effect/reactivity");
+  return {
+    codeMapViewAtom: () => state.view,
+    codeMapSnapshotAtom: () => state.view,
+    codeMapBasesAtom: Atom.make({}),
+  };
+});
 vi.mock("~/state/entities", () => ({
   useThreadShell: () => ({ projectId: "project" }),
+  useProject: () => null,
 }));
 
 import { CodeMapPanel } from "./CodeMapPanel";
@@ -112,6 +117,7 @@ const change = (path: string): CodeMapChange => ({ path, insertions: 4, deletion
 function view(
   threads: CodeMapThreadInput[],
   changes: Record<string, CodeMapChange[]>,
+  reads: Record<string, string[]> = {},
 ): CodeMapView {
   const model = deriveCodeMap({
     snapshot,
@@ -119,7 +125,9 @@ function view(
     changesByRoot: new Map(Object.entries(changes)),
     projectRoots: new Map([[PROJECT_ID, PROJECT]]),
     checkoutRoots: [],
-    backfilledReads: new Map(),
+    backfilledReads: new Map(
+      Object.entries(reads).map(([id, paths]) => [ThreadId.make(id), paths]),
+    ),
     observedReads: new Map(),
   });
   return {
@@ -238,6 +246,20 @@ it("paints marked files over the background", async () => {
   const { x, y } = centreOf(screen, ORCH);
   const background = getComputedStyle(canvas.parentElement!).backgroundColor;
   await vi.waitFor(() => expect(`rgb(${pixel(canvas, x, y)})`).not.toBe(background));
+
+  // A file a running thread only read gets a wash an untouched file does not.
+  const threads = [thread("a", { running: true }), thread("b", { running: true })];
+  const onlyOrch = { "/wt/a": [change(ORCH)], "/wt/b": [change(ORCH)] };
+  const fill = (path: string) => {
+    const centre = centreOf(screen, path);
+    return pixel(canvas, centre.x, centre.y);
+  };
+  await act(() => context.registry.set(state.view, view(threads, onlyOrch)));
+  await vi.waitFor(() => expect(fill(INDEX_CSS)).toBe(fill(GIT)));
+  await act(() =>
+    context.registry.set(state.view, view(threads, onlyOrch, { a: [`/wt/a/${INDEX_CSS}`] })),
+  );
+  await vi.waitFor(() => expect(fill(INDEX_CSS)).not.toBe(fill(GIT)));
 });
 
 it("draws a sprite for each running thread and none for a finished one", async () => {

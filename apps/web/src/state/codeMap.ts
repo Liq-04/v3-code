@@ -54,7 +54,7 @@ interface CodeMapBaseChoice {
 }
 
 /** The base branch the operator chose for each repository's map and overlap pill. */
-const codeMapBasesAtom: Atom.Writable<CodeMapBases, CodeMapBaseChoice> = Atom.writable(
+export const codeMapBasesAtom: Atom.Writable<CodeMapBases, CodeMapBaseChoice> = Atom.writable(
   (): CodeMapBases => {
     try {
       return getLocalStorageItem(CODE_MAP_BASES_STORAGE_KEY, CodeMapBases) ?? NO_BASES;
