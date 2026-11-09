@@ -535,6 +535,36 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["speech voice keyboard hotkey hold toggle auto"],
   },
   {
+    id: "voice-discussions",
+    title: "Discussions",
+    to: "/settings/voice",
+    searchTerms: ["voice call talk speak agent discussion conversation"],
+  },
+  {
+    id: "discussion-elevenlabs-key",
+    title: "ElevenLabs API key",
+    to: "/settings/voice",
+    searchTerms: ["discussion voice call text to speech tts synthesis eleven labs key secret"],
+  },
+  {
+    id: "discussion-voice-id",
+    title: "Discussion voice ID",
+    to: "/settings/voice",
+    searchTerms: ["discussion call elevenlabs voice speaker text to speech tts"],
+  },
+  {
+    id: "discussion-mic-mode",
+    title: "Discussion microphone",
+    to: "/settings/voice",
+    searchTerms: ["discussion call push to talk open mic interrupt barge in headphones"],
+  },
+  {
+    id: "discussion-end-of-speech",
+    title: "End of speech",
+    to: "/settings/voice",
+    searchTerms: ["discussion call silence pause open mic turn taking vad endpointing"],
+  },
+  {
     id: "speech-language",
     title: "Transcription language",
     to: "/settings/voice",

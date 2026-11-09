@@ -1,3 +1,4 @@
+import { discussionLineMessageIds } from "@t3tools/client-runtime/discussion";
 import type {
   ThreadPendingApproval,
   ThreadPendingUserInput,
@@ -392,6 +393,12 @@ export function isSecretRequestActivityGroup(entry: ThreadFeedActivityGroup): bo
   );
 }
 
+export function isDiscussionActivityGroup(entry: ThreadFeedActivityGroup): boolean {
+  return (
+    entry.activities.length === 1 && entry.activities[0]?.projectedItem.item.type === "discussion"
+  );
+}
+
 export function isLinkRequestActivityGroup(entry: ThreadFeedActivityGroup): boolean {
   return (
     entry.activities.length === 1 && entry.activities[0]?.projectedItem.item.type === "link_request"
@@ -440,7 +447,8 @@ function itemIsProminent(item: OrchestrationV2TurnItem): boolean {
     item.type === "system_notice" ||
     item.type === "proposed_plan" ||
     item.type === "secret_request" ||
-    item.type === "link_request"
+    item.type === "link_request" ||
+    item.type === "discussion"
   );
 }
 
@@ -2189,6 +2197,8 @@ export function buildThreadFeed(
   // Thread-wide facts that change rows anywhere in the feed. A cached prefix
   // is reused only while these match the build that produced it.
   const foldedAnswerMessageIds = new Set<string>();
+  // A discussion's lines show inside its card.
+  for (const id of discussionLineMessageIds(visibleTurnItems)) foldedAnswerMessageIds.add(id);
   const delegatedChildrenByRun = new Map<RunId, Set<string>>();
   for (const { item } of visibleTurnItems) {
     if (item.type === "user_input_request" && item.questionAnswer) {
@@ -2247,7 +2257,11 @@ export function buildThreadFeed(
       item.status === "pending"
     )
       continue;
-    if (item.type === "user_message" && foldedAnswerMessageIds.has(item.messageId)) continue;
+    if (
+      (item.type === "user_message" || item.type === "assistant_message") &&
+      foldedAnswerMessageIds.has(item.messageId)
+    )
+      continue;
     if (
       item.type === "run_interrupt_request" ||
       (item.type === "run_interrupt_result" &&
