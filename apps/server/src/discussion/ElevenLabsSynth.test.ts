@@ -1,3 +1,4 @@
+import type { VoiceSynthesisSettings } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -40,12 +41,12 @@ const chunked = (...chunks: ReadonlyArray<ReadonlyArray<number>>) =>
     }),
   );
 
-const withSynth = (client: HttpClient.HttpClient) =>
+const withSynth = (client: HttpClient.HttpClient, voice: Partial<VoiceSynthesisSettings> = {}) =>
   Effect.provide(
     layerElevenLabs.pipe(
       Layer.provide(SecretResolver.layer),
       Layer.provideMerge(
-        ServerSettings.layerTest({ voiceSynthesis: { elevenlabs: "key", voiceId: "" } }),
+        ServerSettings.layerTest({ voiceSynthesis: { elevenlabs: "key", voiceId: "", ...voice } }),
       ),
       Layer.provide(Layer.succeed(HttpClient.HttpClient, client)),
       Layer.provide(Layer.merge(NodeServices.layer, NodeCrypto.layer)),
@@ -86,7 +87,7 @@ it.effect("speaks each sentence as its own request, in order, carrying the one b
           body: {
             text: "Running the tests.",
             model_id: "eleven_v4_turbo",
-            voice_settings: { stability: 0.4 },
+            voice_settings: { stability: 0.4, similarity_boost: 1, clone_strength: 1 },
           },
         },
         {
@@ -96,13 +97,32 @@ it.effect("speaks each sentence as its own request, in order, carrying the one b
           body: {
             text: "Back in a second.",
             model_id: "eleven_v4_turbo",
-            voice_settings: { stability: 0.4 },
+            voice_settings: { stability: 0.4, similarity_boost: 1, clone_strength: 1 },
             previous_text: "Running the tests.",
           },
         },
       ],
     );
   }).pipe(Effect.scoped, withSynth(elevenLabs.client));
+});
+
+it.effect("sends the configured stability, similarity, and clone strength as fractions", () => {
+  const elevenLabs = fakeElevenLabs(() => chunked([1, 2]));
+  return Effect.gen(function* () {
+    const session = yield* (yield* DiscussionSynth).open();
+    yield* session.say("Hello.");
+    yield* session.finish;
+    yield* Stream.runDrain(session.audio);
+
+    assert.deepEqual(elevenLabs.sent[0]?.body.voice_settings, {
+      stability: 0.25,
+      similarity_boost: 0.8,
+      clone_strength: 0,
+    });
+  }).pipe(
+    Effect.scoped,
+    withSynth(elevenLabs.client, { stability: 25, similarity: 80, cloneStrength: 0 }),
+  );
 });
 
 it.effect("a refused key ends the audio with a configuration error", () => {

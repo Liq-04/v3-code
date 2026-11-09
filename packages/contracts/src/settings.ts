@@ -1270,13 +1270,20 @@ export const CloudSpeechCredentials = Schema.Struct({
   openrouter: CloudSpeechCredential,
 });
 
+const VoiceSynthesisPercent = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100 }));
+
 /** Text to speech for discussions. Kept apart from `CloudSpeechCredentials`, which drive transcription. */
 export const VoiceSynthesisSettings = Schema.Struct({
   elevenlabs: SettingsSecretValue.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   /** Empty uses the synthesizer's default voice. */
   voiceId: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  stability: VoiceSynthesisPercent.pipe(Schema.withDecodingDefault(Effect.succeed(40))),
+  similarity: VoiceSynthesisPercent.pipe(Schema.withDecodingDefault(Effect.succeed(100))),
+  /** Professional voice clones only; other voices ignore it. */
+  cloneStrength: VoiceSynthesisPercent.pipe(Schema.withDecodingDefault(Effect.succeed(100))),
 });
 export type VoiceSynthesisSettings = typeof VoiceSynthesisSettings.Type;
+export const DEFAULT_VOICE_SYNTHESIS_SETTINGS = Schema.decodeSync(VoiceSynthesisSettings)({});
 
 export const ServerSettings = Schema.Struct({
   // Null means unmigrated; empty is authoritative and must not resurrect cleared preferences.
@@ -1309,7 +1316,7 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({ openai: "", xai: "", openrouter: "" })),
   ),
   voiceSynthesis: VoiceSynthesisSettings.pipe(
-    Schema.withDecodingDefault(Effect.succeed({ elevenlabs: "", voiceId: "" })),
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_VOICE_SYNTHESIS_SETTINGS)),
   ),
   speechModelId: Schema.String.pipe(
     Schema.withDecodingDefault(Effect.succeed("handy-computer/parakeet-unified-en-0.6b-gguf")),
@@ -1741,6 +1748,9 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Struct({
       elevenlabs: Schema.optionalKey(SettingsSecretValue),
       voiceId: Schema.optionalKey(TrimmedString),
+      stability: Schema.optionalKey(VoiceSynthesisPercent),
+      similarity: Schema.optionalKey(VoiceSynthesisPercent),
+      cloneStrength: Schema.optionalKey(VoiceSynthesisPercent),
     }),
   ),
   speechModelId: Schema.optionalKey(Schema.String),
