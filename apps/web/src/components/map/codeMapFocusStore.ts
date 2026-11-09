@@ -24,7 +24,7 @@ export function useSelectedCodeMapPath(threadRef: ScopedThreadRef): string | nul
   );
 }
 
-function setHoveredPath(path: string | null) {
+export function hoverCodeMapPath(path: string | null) {
   if (useCodeMapFocusStore.getState().hoveredPath !== path) {
     useCodeMapFocusStore.setState({ hoveredPath: path });
   }
@@ -34,7 +34,7 @@ function setHoveredPath(path: string | null) {
 export const codeMapHoverHandlers = {
   onPointerOver: (event: PointerEvent<HTMLElement>) => {
     const row = (event.target as Element).closest<HTMLElement>("[data-map-path]");
-    setHoveredPath(row?.dataset.mapPath ?? null);
+    hoverCodeMapPath(row?.dataset.mapPath ?? null);
   },
-  onPointerLeave: () => setHoveredPath(null),
+  onPointerLeave: () => hoverCodeMapPath(null),
 };

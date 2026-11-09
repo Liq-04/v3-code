@@ -16,7 +16,12 @@ import {
   type EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/models";
 import { createEnvironmentRpcQueryAtomFamily } from "@t3tools/client-runtime/state/runtime";
-import { WS_METHODS, type ScopedProjectRef, type ScopedThreadRef } from "@t3tools/contracts";
+import {
+  WS_METHODS,
+  type ProjectCodeMapSnapshot,
+  type ScopedProjectRef,
+  type ScopedThreadRef,
+} from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 
@@ -43,6 +48,7 @@ export type CodeMapView =
       readonly status: "ready";
       readonly treeSha: string;
       readonly baseRef: string;
+      readonly files: ProjectCodeMapSnapshot["files"];
       readonly model: CodeMap;
       /** Sorted; the array keeps its identity while the set of marked paths is unchanged. */
       readonly markedPaths: ReadonlyArray<string>;
@@ -121,6 +127,7 @@ const codeMapViewFamily = Atom.family((key: string) => {
       status: "ready",
       treeSha: snapshot.treeSha,
       baseRef: snapshot.baseRef,
+      files: snapshot.files,
       model: sameTree ? { ...model, folders: previous.model.folders } : model,
       markedPaths: sameMarks ? previous.markedPaths : markedPaths,
     };
