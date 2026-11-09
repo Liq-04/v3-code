@@ -18,6 +18,7 @@ import {
   ProviderInstanceId,
   type ProviderSessionId,
   ThreadId,
+  TurnItemId,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
@@ -54,6 +55,7 @@ import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 import * as CommandOutputHub from "./CommandOutputHub.ts";
+import * as LiveAssistantTextHub from "./LiveAssistantTextHub.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 
 const layerTestDatabase = SqlitePersistence.layerMemory;
@@ -672,6 +674,7 @@ function layerTest(input: {
     IdAllocator.layer,
     layerConfiguredMcpRegistry,
     McpProviderSessions.layer,
+    LiveAssistantTextHub.layer,
     ProviderSessionManager.layerWithOptions({
       idleTimeoutMs: input.idleTimeoutMs,
       ...(input.maxIdlePinMs === undefined ? {} : { maxIdlePinMs: input.maxIdlePinMs }),
@@ -682,6 +685,7 @@ function layerTest(input: {
           CommandOutputHub.layer.pipe(
             Layer.provide(Layer.merge(layerConfiguredEventSink, layerTestStores)),
           ),
+          LiveAssistantTextHub.layer,
           layerConfiguredEventSink,
           IdAllocator.layer,
           layerProviderEventIngestorTest,
@@ -1482,6 +1486,72 @@ it.effect(
           }),
         ),
       );
+    }),
+);
+
+it.effect(
+  "ProviderSessionManagerV2 copies assistant snapshots to live readers without diverting them",
+  () =>
+    Effect.gen(function* () {
+      const state = yield* Ref.make(emptyState);
+      yield* Effect.gen(function* () {
+        const eventSink = yield* EventSink.EventSinkV2;
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+        const liveText = yield* LiveAssistantTextHub.LiveAssistantTextHub;
+        const now = yield* DateTime.now;
+        const threadId = ThreadId.make("thread-provider-session-manager-live-text");
+        const providerSessionId = idAllocator.derive.providerSession({
+          providerInstanceId: modelSelection.instanceId,
+        });
+        yield* eventSink.write({
+          events: [yield* makeThreadCreatedEvent({ idAllocator, threadId, now })],
+        });
+        const runtime = yield* manager.open({
+          threadId,
+          providerSessionId,
+          modelSelection,
+          runtimePolicy,
+        });
+        const client = yield* runtime.subscribeEvents!;
+        const frames = yield* liveText
+          .subscribe(threadId)
+          .pipe(Stream.take(1), Stream.runCollect, Effect.forkScoped);
+        yield* Effect.yieldNow;
+
+        const queue = (yield* Ref.get(state)).eventQueues.get(String(providerSessionId));
+        assert.isDefined(queue);
+        const turnItem = {
+          id: TurnItemId.make("turn-item:live-text:assistant"),
+          threadId,
+          runId: idAllocator.derive.run({ threadId, ordinal: 1 }),
+          nodeId: null,
+          providerThreadId: null,
+          providerTurnId: null,
+          nativeItemRef: null,
+          parentItemId: null,
+          ordinal: 2,
+          status: "running" as const,
+          title: null,
+          startedAt: now,
+          completedAt: null,
+          updatedAt: now,
+          type: "assistant_message" as const,
+          messageId: yield* idAllocator.allocate.message({ threadId, ordinal: 2 }),
+          text: "Hello there. And",
+          streaming: true,
+        };
+        yield* Queue.offer(queue!, { type: "turn_item.updated", driver: CODEX_DRIVER, turnItem });
+
+        const [frame] = Array.from(yield* Fiber.join(frames));
+        assert.deepInclude(frame, { kind: "text", text: "Hello there. And", complete: false });
+        // The run's own subscriber still gets the full event for persistence.
+        const published = Option.getOrUndefined(yield* client.events.pipe(Stream.runHead));
+        assert.deepEqual(
+          published?.type === "turn_item.updated" ? published.turnItem : undefined,
+          turnItem,
+        );
+      }).pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 60_000 })));
     }),
 );
 

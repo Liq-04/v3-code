@@ -49,6 +49,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
 import * as EventSink from "./EventSink.ts";
 import * as CommandOutputHub from "./CommandOutputHub.ts";
+import * as LiveAssistantTextHub from "./LiveAssistantTextHub.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderEventIngestor from "./ProviderEventIngestor.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
@@ -332,6 +333,7 @@ export const layerWithOptions = (
   ProviderSessionManagerV2,
   never,
   | CommandOutputHub.CommandOutputHub
+  | LiveAssistantTextHub.LiveAssistantTextHub
   | EventSink.EventSinkV2
   | FileSystem.FileSystem
   | IdAllocator.IdAllocatorV2
@@ -353,6 +355,7 @@ export const layerWithOptions = (
       const projectService = yield* Effect.serviceOption(ProjectService.ProjectService);
       const eventSink = yield* EventSink.EventSinkV2;
       const commandOutput = yield* CommandOutputHub.CommandOutputHub;
+      const liveAssistantText = yield* LiveAssistantTextHub.LiveAssistantTextHub;
       const promptSuggestionStore = yield* SubscriptionRef.make<
         ReadonlyMap<ThreadId, NonNullable<OrchestrationV2PromptSuggestion>>
       >(new Map());
@@ -2206,6 +2209,11 @@ export const layerWithOptions = (
                 return next;
               });
             }
+            // A copy of the raw item for live readers; the event itself continues unchanged.
+            const copyLiveText =
+              event.type === "turn_item.updated"
+                ? liveAssistantText.observe(event.turnItem)
+                : Effect.void;
             const releaseLiveOutput =
               event.type === "turn_item.updated" &&
               event.turnItem.type === "command_execution" &&
@@ -2223,78 +2231,81 @@ export const layerWithOptions = (
               lastSessionStatus = event.providerSession.status;
               if (lastSessionStatus === "stopped") stoppedByProvider = true;
             }
-            return observeActivity(
-              entry.runtime.providerSessionId,
-              event.type === "turn.terminal"
-                ? markIdle(
-                    entry.runtime.providerSessionId,
-                    event.providerThreadId,
-                    event.runOrdinal,
-                  )
-                : metadataOnly
-                  ? Effect.void
-                  : touchActivity(entry.runtime.providerSessionId, { providerActivity: true }),
-            ).pipe(
-              Effect.andThen(
-                event.type === "provider_session.updated"
-                  ? persistProviderSessionUpdate(entry, event)
-                  : Effect.void,
-              ),
-              Effect.andThen(
-                Effect.gen(function* () {
-                  if (
-                    event.type === "provider_thread.updated" &&
-                    event.providerThread.status === "error"
-                  ) {
-                    const threadId = event.providerThread.appThreadId;
-                    yield* Ref.update(sessions, (sessions) => {
-                      const key = sessionKey(entry.runtime.providerSessionId);
-                      const latest = sessions.get(key);
-                      if (latest?.runtime !== entry.runtime || threadId === null) return sessions;
-                      const loadedProviderThreadKeyByThread = new Map(
-                        latest.loadedProviderThreadKeyByThread,
-                      );
-                      loadedProviderThreadKeyByThread.delete(threadId);
-                      return new Map(sessions).set(key, {
-                        ...latest,
-                        loadedProviderThreadKeyByThread,
-                      });
-                    });
-                  }
-                  // Some providers can block before a run subscriber exists
-                  // (project trust, login, or session-switch hooks). Persist
-                  // their runless request artifacts directly so the normal T3
-                  // request UI can answer them and unblock session setup.
-                  const threadId = sessionScopedRuntimeRequestThreadId(event);
-                  if (threadId !== undefined) {
-                    yield* Effect.gen(function* () {
-                      const current = (yield* Ref.get(sessions)).get(
-                        sessionKey(entry.runtime.providerSessionId),
-                      );
-                      if (current?.runtime !== entry.runtime) return;
-                      yield* providerEventIngestor
-                        .ingestNormalized({
-                          providerSessionId: entry.runtime.providerSessionId,
-                          providerInstanceId: entry.runtime.instanceId,
-                          threadId,
-                          event,
-                        })
-                        .pipe(
-                          Effect.mapError(
-                            (cause) =>
-                              new ProviderAdapter.ProviderAdapterEventStreamError({
-                                driver: entry.runtime.driver,
-                                providerSessionId: entry.runtime.providerSessionId,
-                                cause,
-                              }),
-                          ),
+            return Effect.andThen(
+              copyLiveText,
+              observeActivity(
+                entry.runtime.providerSessionId,
+                event.type === "turn.terminal"
+                  ? markIdle(
+                      entry.runtime.providerSessionId,
+                      event.providerThreadId,
+                      event.runOrdinal,
+                    )
+                  : metadataOnly
+                    ? Effect.void
+                    : touchActivity(entry.runtime.providerSessionId, { providerActivity: true }),
+              ).pipe(
+                Effect.andThen(
+                  event.type === "provider_session.updated"
+                    ? persistProviderSessionUpdate(entry, event)
+                    : Effect.void,
+                ),
+                Effect.andThen(
+                  Effect.gen(function* () {
+                    if (
+                      event.type === "provider_thread.updated" &&
+                      event.providerThread.status === "error"
+                    ) {
+                      const threadId = event.providerThread.appThreadId;
+                      yield* Ref.update(sessions, (sessions) => {
+                        const key = sessionKey(entry.runtime.providerSessionId);
+                        const latest = sessions.get(key);
+                        if (latest?.runtime !== entry.runtime || threadId === null) return sessions;
+                        const loadedProviderThreadKeyByThread = new Map(
+                          latest.loadedProviderThreadKeyByThread,
                         );
-                    }).pipe(entry.requestEventPermit.withPermits(1));
-                    return;
-                  }
-                  yield* publishToSubscribers(entry.eventSubscribers, { type: "event", event });
-                  yield* releaseLiveOutput;
-                }),
+                        loadedProviderThreadKeyByThread.delete(threadId);
+                        return new Map(sessions).set(key, {
+                          ...latest,
+                          loadedProviderThreadKeyByThread,
+                        });
+                      });
+                    }
+                    // Some providers can block before a run subscriber exists
+                    // (project trust, login, or session-switch hooks). Persist
+                    // their runless request artifacts directly so the normal T3
+                    // request UI can answer them and unblock session setup.
+                    const threadId = sessionScopedRuntimeRequestThreadId(event);
+                    if (threadId !== undefined) {
+                      yield* Effect.gen(function* () {
+                        const current = (yield* Ref.get(sessions)).get(
+                          sessionKey(entry.runtime.providerSessionId),
+                        );
+                        if (current?.runtime !== entry.runtime) return;
+                        yield* providerEventIngestor
+                          .ingestNormalized({
+                            providerSessionId: entry.runtime.providerSessionId,
+                            providerInstanceId: entry.runtime.instanceId,
+                            threadId,
+                            event,
+                          })
+                          .pipe(
+                            Effect.mapError(
+                              (cause) =>
+                                new ProviderAdapter.ProviderAdapterEventStreamError({
+                                  driver: entry.runtime.driver,
+                                  providerSessionId: entry.runtime.providerSessionId,
+                                  cause,
+                                }),
+                            ),
+                          );
+                      }).pipe(entry.requestEventPermit.withPermits(1));
+                      return;
+                    }
+                    yield* publishToSubscribers(entry.eventSubscribers, { type: "event", event });
+                    yield* releaseLiveOutput;
+                  }),
+                ),
               ),
             );
           }),
