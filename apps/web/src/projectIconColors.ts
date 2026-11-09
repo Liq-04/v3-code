@@ -123,3 +123,8 @@ const PROJECT_ICON_COLOR_CLASSES = Object.fromEntries(
 export function projectIconColorClassName(color: ProjectIconColor): string {
   return PROJECT_ICON_COLOR_CLASSES[color];
 }
+
+/** Tailwind emits a theme variable only where a class uses it; the swatch classes above cover every colour. */
+export function projectIconColorValue(color: ProjectIconColor): string {
+  return `var(--color-${color}-500)`;
+}

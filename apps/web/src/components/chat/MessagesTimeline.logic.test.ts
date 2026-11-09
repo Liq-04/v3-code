@@ -33,6 +33,7 @@ import {
   resolveAssistantMessageCopyState,
   type MessagesTimelineRow,
   workEntryDisplayLabel,
+  workEntryMapPath,
 } from "./MessagesTimeline.logic";
 
 describe("resolveAssistantMessageCopyState", () => {
@@ -4555,5 +4556,30 @@ describe("shouldCollapseUserMessage", () => {
 
     expect(shouldCollapseUserMessage(`${citation} Can you expand on this?`)).toBe(false);
     expect(shouldCollapseUserMessage(`${citation} ${"More text. ".repeat(60)}`)).toBe(true);
+  });
+});
+
+describe("workEntryMapPath", () => {
+  const entry = (changedFiles: string[], toolData: unknown = null) =>
+    ({ changedFiles, toolData }) as unknown as Parameters<typeof workEntryMapPath>[0];
+
+  it.each([
+    {
+      name: "absolute inside the root",
+      files: ["/wt/a/src/x.ts"],
+      root: "/wt/a/",
+      expected: "src/x.ts",
+    },
+    {
+      name: "position suffix dropped",
+      files: ["/wt/a/src/x.ts:12"],
+      root: "/wt/a",
+      expected: "src/x.ts",
+    },
+    { name: "relative with ./", files: ["./src/x.ts"], root: "/wt/a", expected: "src/x.ts" },
+    { name: "outside the root", files: ["/elsewhere/x.ts"], root: "/wt/a", expected: undefined },
+    { name: "no path", files: [], root: "/wt/a", expected: undefined },
+  ])("$name", ({ files, root, expected }) => {
+    expect(workEntryMapPath(entry(files), root)).toBe(expected);
   });
 });

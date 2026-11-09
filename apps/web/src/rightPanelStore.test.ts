@@ -391,6 +391,31 @@ describe("rightPanelStore", () => {
     expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBe("diff");
   });
 
+  it("keeps a map tab across reload and brings it back as a closed view", async () => {
+    const store = useRightPanelStore.getState();
+    store.open(refA, "map");
+    await reloadRightPanelStore();
+    expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      id: "map",
+      kind: "map",
+    });
+
+    store.closeSurface(refA, "map");
+    expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBeNull();
+    await reopenClosedView(useClosedViewStore.getState().entries[0]!, {
+      workspaceAvailable: false,
+      openPreview: () => {
+        throw new Error("A map tab must not create a browser session");
+      },
+    });
+    expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBe("map");
+
+    store.toggle(refA, "map");
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).isOpen,
+    ).toBe(false);
+  });
+
   it("offers each completed diff once across dismissal, panel changes, and reload", async () => {
     const store = useRightPanelStore.getState();
     expect(store.openProactive(refA, completedDiff, store.getUserActionRevision(refA))).toBe(true);

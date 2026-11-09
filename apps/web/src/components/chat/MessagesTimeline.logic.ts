@@ -76,6 +76,7 @@ import {
   formatReadToolLabel,
   formatSearchToolLabel,
 } from "@t3tools/shared/toolActivity";
+import { splitFilePathPosition } from "@t3tools/shared/fileLinks";
 import { isWindowsAbsolutePath } from "@t3tools/shared/path";
 
 function timelineEntryRunId(entry: TimelineEntry): RunId | null {
@@ -126,6 +127,19 @@ function workEntryReadRawPaths(entry: WorkLogEntry): readonly string[] {
     if (structuredPaths.length > 0) return structuredPaths;
   }
   return collectToolFilePaths(workEntryToolDataRecord(entry));
+}
+
+export function workEntryMapPath(
+  entry: WorkLogEntry,
+  workspaceRoot: string | undefined,
+): string | undefined {
+  const raw = workEntryReadRawPaths(entry)[0];
+  if (!raw) return undefined;
+  const path = splitFilePathPosition(raw.trim().replaceAll("\\", "/")).path;
+  const root = workspaceRoot?.replaceAll("\\", "/").replace(/\/+$/, "");
+  if (root && path.startsWith(`${root}/`)) return path.slice(root.length + 1);
+  if (path.startsWith("/") || isWindowsAbsolutePath(path)) return undefined;
+  return path.replace(/^\.\//, "") || undefined;
 }
 
 function workEntryReadPaths(entry: WorkLogEntry, workspaceRoot: string | undefined): string[] {

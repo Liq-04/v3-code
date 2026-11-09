@@ -43,6 +43,9 @@ import { textDirection } from "~/textDirection";
 import { useClientSettings } from "../../hooks/useSettings";
 import { DiscussionIndicator } from "./DiscussionIndicator";
 import { GuestShareIndicator } from "./GuestShareControls";
+import { selectCodeMapPath } from "../map/codeMapFocusStore";
+import { useRightPanelStore } from "~/rightPanelStore";
+import { threadOverlapsAtom } from "~/state/codeMap";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -95,6 +98,13 @@ export const ChatHeader = memo(function ChatHeader({
     activeThreadEnvironmentId,
     AuthOrchestrationOperateScope,
   );
+  const overlaps = useAtomValue(threadOverlapsAtom(activeThreadRef));
+  const openOverlapsOnMap = () => {
+    const first = overlaps[0];
+    if (!first) return;
+    selectCodeMapPath(activeThreadRef, first.path);
+    useRightPanelStore.getState().open(activeThreadRef, "map");
+  };
   const canShareWithGuest = useAtomValue(canShareWithGuestAtom(activeThreadEnvironmentId));
   const updateThreadMetadata = useOrchestrationCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
@@ -426,6 +436,33 @@ export const ChatHeader = memo(function ChatHeader({
               </TooltipTrigger>
               <TooltipPopup side="top">
                 Started by an agent on {activeThreadLinkOrigin} through a linked environment.
+              </TooltipPopup>
+            </Tooltip>
+          ) : null}
+          {renamingTitle === null && overlaps.length > 0 ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Badge
+                    variant="warning"
+                    size="sm"
+                    render={<button type="button" onClick={openOverlapsOnMap} />}
+                  />
+                }
+              >
+                Shares {overlaps.length} {overlaps.length === 1 ? "file" : "files"}
+              </TooltipTrigger>
+              <TooltipPopup side="top">
+                <div className="flex flex-col gap-1">
+                  {overlaps.map((overlap) => (
+                    <div key={overlap.path}>
+                      <div className="font-mono">{overlap.path}</div>
+                      <div className="text-muted-foreground">
+                        Also changed in {overlap.otherTitles.join(", ")}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </TooltipPopup>
             </Tooltip>
           ) : null}

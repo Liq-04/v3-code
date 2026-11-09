@@ -44,6 +44,8 @@ const FIXTURES = "../src/orchestration-v2/testkit/fixtures";
 // Use acpRegistry transcripts: vendor transcripts carry state in frames this agent drops.
 export const SCENARIOS = [
   { id: "showcase", name: "Showcase", file: "./dev-replay/showcase_transcript.ndjson" },
+  { id: "code-map-a", name: "Code map A", file: "./dev-replay/code_map_a_transcript.ndjson" },
+  { id: "code-map-b", name: "Code map B", file: "./dev-replay/code_map_b_transcript.ndjson" },
   {
     id: "todo-list",
     name: "Plan and reads",
@@ -84,7 +86,7 @@ const REPLAYED_REQUESTS = new Set(["session/request_permission", "elicitation/cr
 
 const CHUNK_DELAY_MS = 30;
 const FRAME_DELAY_MS = 250;
-const MAX_RECORDED_DELAY_MS = 2_000;
+const MAX_RECORDED_DELAY_MS = 3_000;
 const WORDS_PER_CHUNK = 3;
 
 function isReplayedFrame(frame: LogicalFrame): boolean {
