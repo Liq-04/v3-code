@@ -269,8 +269,16 @@ export const make = Effect.gen(function* () {
 
   const changes = Effect.fn("ProjectCodeMap.changes")(function* (root: string, baseRef?: string) {
     const base = yield* resolveBase(root, baseRef);
+    // A project can be rooted in a subfolder; untracked files are only listed below the cwd.
+    const checkout = yield* git
+      .execute({
+        operation: "ProjectCodeMap.checkoutRoot",
+        cwd: root,
+        args: ["rev-parse", "--show-toplevel"],
+      })
+      .pipe(Effect.mapError(gitFailed));
     const { files, filesTotal } = yield* git
-      .readBranchChanges(root, base.ref)
+      .readBranchChanges(checkout.stdout.trim(), base.ref)
       .pipe(Effect.mapError(gitFailed));
     return { files, filesTotal } satisfies ProjectCodeMapChanges;
   });

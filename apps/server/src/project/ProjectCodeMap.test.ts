@@ -201,10 +201,17 @@ describe("ProjectCodeMap", () => {
         filesTotal: 4,
       });
 
+      const path = yield* Path.Path;
+      yield* repo.write("docs/guide.md", lines(1));
+      assert.deepStrictEqual(
+        (yield* codeMap.changes(path.join(repo.cwd, "docs"))).files.map((file) => file.path),
+        ["untracked.ts", "a.ts", "parent.ts", "child.ts", "docs/guide.md"],
+      );
+
       const againstParent = yield* codeMap.changes(repo.cwd, "parent");
       assert.deepStrictEqual(
         againstParent.files.map((file) => file.path),
-        ["untracked.ts", "a.ts", "child.ts"],
+        ["untracked.ts", "a.ts", "child.ts", "docs/guide.md"],
       );
 
       const error = yield* codeMap.changes(repo.cwd, "missing").pipe(Effect.flip);
