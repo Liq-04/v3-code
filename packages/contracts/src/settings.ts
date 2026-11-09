@@ -24,6 +24,11 @@ import { UsageLimitSourceId } from "./usageLimitSourceId.ts";
 import { UsageModelFilter } from "./usage.ts";
 import { SecretProviderId, SecretProviderSlug } from "./secretReference.ts";
 import { SettingsSecretValue } from "./settingsSecretValue.ts";
+import {
+  DEFAULT_DISCUSSION_END_OF_SPEECH_MS,
+  DiscussionEndOfSpeechMs,
+  DiscussionMicMode,
+} from "./discussion.ts";
 import { EnvironmentMachineKind, ThreadEnvMode, WorktreeSubmodules } from "./environment.ts";
 import { KeybindingShortcut } from "./keybindings.ts";
 import {
@@ -555,6 +560,10 @@ export const ClientSettingsSchema = Schema.Struct({
     ),
   ),
   speechCorrectionWord: SpeechCorrectionCue.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  discussionMicMode: DiscussionMicMode.pipe(Schema.withDecodingDefault(Effect.succeed("open"))),
+  discussionEndOfSpeechMs: DiscussionEndOfSpeechMs.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_DISCUSSION_END_OF_SPEECH_MS)),
+  ),
   snapShotEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   snapShotIncludeAccessibility: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(true)),
@@ -1261,6 +1270,14 @@ export const CloudSpeechCredentials = Schema.Struct({
   openrouter: CloudSpeechCredential,
 });
 
+/** Text to speech for discussions. Kept apart from `CloudSpeechCredentials`, which drive transcription. */
+export const VoiceSynthesisSettings = Schema.Struct({
+  elevenlabs: SettingsSecretValue.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  /** Empty uses the synthesizer's default voice. */
+  voiceId: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+});
+export type VoiceSynthesisSettings = typeof VoiceSynthesisSettings.Type;
+
 export const ServerSettings = Schema.Struct({
   // Null means unmigrated; empty is authoritative and must not resurrect cleared preferences.
   favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
@@ -1290,6 +1307,9 @@ export const ServerSettings = Schema.Struct({
   enableAgentBrowserAccess: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   cloudSpeechCredentials: CloudSpeechCredentials.pipe(
     Schema.withDecodingDefault(Effect.succeed({ openai: "", xai: "", openrouter: "" })),
+  ),
+  voiceSynthesis: VoiceSynthesisSettings.pipe(
+    Schema.withDecodingDefault(Effect.succeed({ elevenlabs: "", voiceId: "" })),
   ),
   speechModelId: Schema.String.pipe(
     Schema.withDecodingDefault(Effect.succeed("handy-computer/parakeet-unified-en-0.6b-gguf")),
@@ -1717,6 +1737,12 @@ export const ServerSettingsPatch = Schema.Struct({
       openrouter: Schema.optionalKey(SettingsSecretValue),
     }),
   ),
+  voiceSynthesis: Schema.optionalKey(
+    Schema.Struct({
+      elevenlabs: Schema.optionalKey(SettingsSecretValue),
+      voiceId: Schema.optionalKey(TrimmedString),
+    }),
+  ),
   speechModelId: Schema.optionalKey(Schema.String),
   speechAcceleration: Schema.optionalKey(SpeechAcceleration),
   speechModelUnloadTimeout: Schema.optionalKey(SpeechModelUnloadTimeout),
@@ -1950,6 +1976,8 @@ export const ClientSettingsPatch = Schema.Struct({
   speechRemoveFillerWords: Schema.optionalKey(Schema.Boolean),
   speechPostProcessingPrompt: Schema.optionalKey(SpeechPostProcessingPromptSettings),
   speechCorrectionWord: Schema.optionalKey(SpeechCorrectionCue),
+  discussionMicMode: Schema.optionalKey(DiscussionMicMode),
+  discussionEndOfSpeechMs: Schema.optionalKey(DiscussionEndOfSpeechMs),
   snapShotEnabled: Schema.optionalKey(Schema.Boolean),
   snapShotIncludeAccessibility: Schema.optionalKey(Schema.Boolean),
   snapShotShortcut: Schema.optionalKey(SnapShotShortcut),
