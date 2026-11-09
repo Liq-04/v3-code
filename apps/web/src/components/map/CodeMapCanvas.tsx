@@ -358,7 +358,7 @@ function screenRectAtLeast(scene: Scene, file: WorldFile, minPx: number) {
 const onScreen = (scene: Scene, r: { sx: number; sy: number; sw: number; sh: number }) =>
   r.sx <= scene.width && r.sy <= scene.height && r.sx + r.sw >= 0 && r.sy + r.sh >= 0;
 
-/** A faint wash in each reader's colour, split into bands when several threads read the file. */
+/** An outline and light wash in each reader's colour, split into bands when several threads read it. */
 function drawRead(scene: Scene, world: World, read: ReadView) {
   const file = world.files.get(read.path);
   if (!file) return;
@@ -366,10 +366,16 @@ function drawRead(scene: Scene, world: World, read: ReadView) {
   if (!onScreen(scene, r)) return;
   const { ctx, palette } = scene;
   const band = r.sw / read.threadIds.length;
-  ctx.globalAlpha = read.strong ? 0.2 : 0.08;
   read.threadIds.forEach((threadId, index) => {
-    ctx.fillStyle = palette.thread(threadId);
-    ctx.fillRect(r.sx + index * band, r.sy, band, r.sh);
+    const color = palette.thread(threadId);
+    const x = r.sx + index * band;
+    ctx.fillStyle = color;
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = read.strong ? 0.15 : 0.06;
+    ctx.fillRect(x, r.sy, band, r.sh);
+    ctx.globalAlpha = read.strong ? 0.9 : 0.4;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, r.sy + 0.5, band - 1, r.sh - 1);
   });
   ctx.globalAlpha = 1;
 }
