@@ -49,7 +49,11 @@ const ref = scopeThreadRef(EnvironmentId.make("environment"), ThreadId.make("a")
 const snapshot: ProjectCodeMapSnapshot = {
   treeSha: "8e1581ad8f00",
   baseRef: "main",
-  files: { paths: [CHAT_VIEW, INDEX_CSS, ORCH, GIT], lines: [1600, 1300, 4200, 700] },
+  files: {
+    paths: [CHAT_VIEW, INDEX_CSS, ORCH, GIT],
+    lines: [1600, 1300, 4200, 700],
+    vendored: [false, false, false, false],
+  },
   folders: [
     { path: "apps", fileCount: 2, lines: 2900 },
     { path: "apps/web", fileCount: 2, lines: 2900 },

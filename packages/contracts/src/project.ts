@@ -315,14 +315,15 @@ export const ProjectCodeMapFolder = Schema.Struct({
 });
 export type ProjectCodeMapFolder = typeof ProjectCodeMapFolder.Type;
 
-// `files` is columnar: `paths[i]` has `lines[i]` lines. Vendored, generated, and over-cap
-// files count only in `folders` and `filesTotal`.
+// `files` is columnar: `paths[i]` has `lines[i]` lines and is vendored or generated when
+// `vendored[i]`. Over-cap files count only in `folders` and `filesTotal`.
 export const ProjectCodeMapSnapshot = Schema.Struct({
   treeSha: TrimmedNonEmptyString,
   baseRef: TrimmedNonEmptyString,
   files: Schema.Struct({
     paths: Schema.Array(Schema.String),
     lines: Schema.Array(NonNegativeInt),
+    vendored: Schema.Array(Schema.Boolean),
   }),
   folders: Schema.Array(ProjectCodeMapFolder),
   filesTotal: NonNegativeInt,

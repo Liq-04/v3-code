@@ -78,42 +78,46 @@ const makeRepository = Effect.fn("makeRepository")(function* () {
 const lines = (count: number) => "line\n".repeat(count);
 
 describe("ProjectCodeMap", () => {
-  it.effect(
-    "counts lines, folds vendored and generated paths into folders, and zeroes binaries",
-    () =>
-      Effect.gen(function* () {
-        const repo = yield* makeRepository();
-        yield* repo.write("src/a.ts", lines(3));
-        yield* repo.write("src/deep/b.ts", lines(5));
-        yield* repo.write("logo.png", new Uint8Array([0, 1, 2, 0, 255]));
-        yield* repo.write(
-          ".gitattributes",
-          "vendor/** linguist-vendored\n*.gen.ts linguist-generated\n",
-        );
-        yield* repo.write("vendor/lib.js", lines(40));
-        yield* repo.write("src/schema.gen.ts", lines(7));
-        yield* repo.commit("initial");
+  it.effect("counts lines, lists vendored and generated paths flagged, and zeroes binaries", () =>
+    Effect.gen(function* () {
+      const repo = yield* makeRepository();
+      yield* repo.write("src/a.ts", lines(3));
+      yield* repo.write("src/deep/b.ts", lines(5));
+      yield* repo.write("logo.png", new Uint8Array([0, 1, 2, 0, 255]));
+      yield* repo.write(
+        ".gitattributes",
+        "vendor/** linguist-vendored\n*.gen.ts linguist-generated\n",
+      );
+      yield* repo.write("vendor/lib.js", lines(40));
+      yield* repo.write("src/schema.gen.ts", lines(7));
+      yield* repo.commit("initial");
 
-        const codeMap = yield* ProjectCodeMap.ProjectCodeMap;
-        const snapshot = yield* codeMap.snapshot(repo.cwd);
+      const codeMap = yield* ProjectCodeMap.ProjectCodeMap;
+      const snapshot = yield* codeMap.snapshot(repo.cwd);
 
-        assert.strictEqual(snapshot.baseRef, "main");
-        assert.deepStrictEqual(
-          snapshot.files.paths.map((path, index) => [path, snapshot.files.lines[index]]),
-          [
-            ["src/deep/b.ts", 5],
-            ["src/a.ts", 3],
-            [".gitattributes", 2],
-            ["logo.png", 0],
-          ],
-        );
-        assert.strictEqual(snapshot.filesTotal, 6);
-        assert.deepStrictEqual(snapshot.folders, [
-          { path: "src", fileCount: 3, lines: 15 },
-          { path: "src/deep", fileCount: 1, lines: 5 },
-          { path: "vendor", fileCount: 1, lines: 40 },
-        ]);
-      }).pipe(Effect.scoped, Effect.provide(layerTest(Ref.makeUnsafe(0)))),
+      assert.strictEqual(snapshot.baseRef, "main");
+      assert.deepStrictEqual(
+        snapshot.files.paths.map((path, index) => [
+          path,
+          snapshot.files.lines[index],
+          snapshot.files.vendored[index],
+        ]),
+        [
+          ["vendor/lib.js", 40, true],
+          ["src/schema.gen.ts", 7, true],
+          ["src/deep/b.ts", 5, false],
+          ["src/a.ts", 3, false],
+          [".gitattributes", 2, false],
+          ["logo.png", 0, false],
+        ],
+      );
+      assert.strictEqual(snapshot.filesTotal, 6);
+      assert.deepStrictEqual(snapshot.folders, [
+        { path: "src", fileCount: 3, lines: 15 },
+        { path: "src/deep", fileCount: 1, lines: 5 },
+        { path: "vendor", fileCount: 1, lines: 40 },
+      ]);
+    }).pipe(Effect.scoped, Effect.provide(layerTest(Ref.makeUnsafe(0)))),
   );
 
   it.effect("reads the default branch rather than the checked-out one", () =>
@@ -163,15 +167,19 @@ describe("ProjectCodeMap", () => {
 });
 
 describe("foldCodeMap", () => {
-  it("lists the largest files first, caps the list, and keeps capped files in folder totals", () => {
+  it("lists vendored files too, largest first, caps the list, and keeps capped files in folder totals", () => {
     const entries = [
-      { path: "a/small.ts", lines: 1, folded: false },
-      { path: "a/big.ts", lines: 9, folded: false },
-      { path: "b/mid.ts", lines: 5, folded: false },
-      { path: "b/vendored.ts", lines: 100, folded: true },
+      { path: "a/small.ts", lines: 1, vendored: false },
+      { path: "a/big.ts", lines: 9, vendored: false },
+      { path: "b/mid.ts", lines: 5, vendored: false },
+      { path: "b/vendored.ts", lines: 100, vendored: true },
     ];
     const result = ProjectCodeMap.foldCodeMap(entries, 2);
-    assert.deepStrictEqual(result.files, { paths: ["a/big.ts", "b/mid.ts"], lines: [9, 5] });
+    assert.deepStrictEqual(result.files, {
+      paths: ["b/vendored.ts", "a/big.ts"],
+      lines: [100, 9],
+      vendored: [true, false],
+    });
     assert.strictEqual(result.filesTotal, 4);
     assert.deepStrictEqual(result.folders, [
       { path: "a", fileCount: 2, lines: 10 },
