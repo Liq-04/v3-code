@@ -133,6 +133,7 @@ import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
+import * as ProjectCodeMap from "./project/ProjectCodeMap.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as SourceControlProviderRegistry from "./sourceControl/SourceControlProviderRegistry.ts";
 import * as PullRequestReadCache from "./pullRequest/PullRequestReadCache.ts";
@@ -463,12 +464,15 @@ const layerReview = ReviewService.layer.pipe(
   Layer.provideMerge(layerVcsDriverRegistry),
 );
 
+const layerProjectCodeMap = ProjectCodeMap.layer.pipe(Layer.provideMerge(GitVcsDriver.layer));
+
 const layerVcs = Layer.empty.pipe(
   Layer.provideMerge(VcsProjectConfig.layer),
   Layer.provideMerge(layerVcsDriverRegistry),
   Layer.provideMerge(VcsProvisioningService.layer.pipe(Layer.provide(layerVcsDriverRegistry))),
   Layer.provideMerge(layerGitWorkflow),
   Layer.provideMerge(layerReview),
+  Layer.provideMerge(layerProjectCodeMap),
   Layer.provideMerge(layerSourceControlRepositoryService),
   Layer.provideMerge(
     SourceControlSignIn.layer.pipe(Layer.provide(layerSourceControlProviderRegistry)),

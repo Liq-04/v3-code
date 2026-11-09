@@ -71,6 +71,7 @@ import {
   type ProjectFileFailure,
   type ProjectFileOperation,
   type ProjectMutation,
+  ProjectCodeMapError,
   ProjectListEntriesError,
   ProjectReadFileError,
   ProjectSearchContentsError,
@@ -216,6 +217,7 @@ import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import { refreshPushedPullRequests } from "./git/refreshPushedPullRequests.ts";
 import { linkCreatedPullRequest } from "./git/linkCreatedPullRequest.ts";
 import * as ReviewService from "./review/ReviewService.ts";
+import * as ProjectCodeMap from "./project/ProjectCodeMap.ts";
 import * as ProjectEnrichmentService from "./project/ProjectEnrichmentService.ts";
 import * as ProjectService from "./project/ProjectService.ts";
 import { threadWorkspaceRoot } from "./project/threadWorkspaceRoot.ts";
@@ -1503,6 +1505,7 @@ export const layerWsRpc = (
       const directEndpoints = yield* DirectEndpoints.DirectEndpoints;
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
       const review = yield* ReviewService.ReviewService;
+      const projectCodeMap = yield* ProjectCodeMap.ProjectCodeMap;
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
       const terminalManager = yield* TerminalManager.TerminalManager;
@@ -3003,6 +3006,22 @@ export const layerWsRpc = (
                   ...projectEntriesFailureContext(cause),
                   cause,
                 }),
+            ),
+          ),
+        [WS_METHODS.projectsGetCodeMap]: (input) =>
+          projectService.getById(input.projectId).pipe(
+            Effect.mapError((cause) => new ProjectCodeMapError({ failure: "git_failed", cause })),
+            Effect.flatMap(
+              Option.match({
+                onNone: () =>
+                  Effect.fail(
+                    new ProjectCodeMapError({
+                      failure: "project_not_found",
+                      projectId: input.projectId,
+                    }),
+                  ),
+                onSome: (project) => projectCodeMap.snapshot(project.workspaceRoot),
+              }),
             ),
           ),
         [WS_METHODS.projectsListIgnoredFiles]: (input) =>

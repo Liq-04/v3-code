@@ -242,6 +242,9 @@ import {
   ProjectCreateFromThreadResult,
   ProjectEnsureScratchResult,
   ProjectListEntriesError,
+  ProjectCodeMapError,
+  ProjectCodeMapInput,
+  ProjectCodeMapSnapshot,
   ProjectListEntriesInput,
   ProjectListEntriesResult,
   ProjectListIgnoredFilesInput,
@@ -413,6 +416,7 @@ import { Project, ProjectMutation, ProjectMutationError } from "./project.ts";
 export const WS_METHODS = {
   projectsListEntries: "projects.listEntries",
   projectsListIgnoredFiles: "projects.listIgnoredFiles",
+  projectsGetCodeMap: "projects.getCodeMap",
   projectsReadFile: "projects.readFile",
   projectsSearchContents: "projects.searchContents",
   projectsSearchEntries: "projects.searchEntries",
@@ -1338,6 +1342,12 @@ const WsProjectsListEntriesRpc = Rpc.make(WS_METHODS.projectsListEntries, {
   error: Schema.Union([ProjectListEntriesError, EnvironmentAuthorizationError]),
 });
 
+const WsProjectsGetCodeMapRpc = Rpc.make(WS_METHODS.projectsGetCodeMap, {
+  payload: ProjectCodeMapInput,
+  success: ProjectCodeMapSnapshot,
+  error: Schema.Union([ProjectCodeMapError, EnvironmentAuthorizationError]),
+});
+
 const WsProjectsListIgnoredFilesRpc = Rpc.make(WS_METHODS.projectsListIgnoredFiles, {
   payload: ProjectListIgnoredFilesInput,
   success: ProjectListIgnoredFilesResult,
@@ -2177,6 +2187,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectCloneRetryRpc,
   WsSubscribeProjectClonesRpc,
   WsProjectsListEntriesRpc,
+  WsProjectsGetCodeMapRpc,
   WsProjectsListIgnoredFilesRpc,
   WsProjectsReadFileRpc,
   WsProjectsSearchContentsRpc,
