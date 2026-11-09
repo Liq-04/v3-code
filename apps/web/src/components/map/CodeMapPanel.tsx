@@ -29,6 +29,7 @@ import { codeMapSnapshotAtom, codeMapViewAtom, type CodeMapView } from "~/state/
 import { useThreadShell, useThreadShellsForProjectRefs } from "~/state/entities";
 import { buildThreadRouteParams } from "~/threadRoutes";
 
+import { useCodeMapFocusStore, useSelectedCodeMapPath } from "./codeMapFocusStore";
 import { layoutCodeMap, slotForPath, type MapCell, type MapLayout } from "./mapLayout";
 
 type Scope = "thread" | "all";
@@ -178,6 +179,8 @@ function CodeMapCanvas(props: {
   const router = useRouter();
   const [box, setBox] = useState({ width: 0, height: 0 });
   const shells = useThreadShellsForProjectRefs([props.projectRef]);
+  const selectedPath = useSelectedCodeMapPath(threadRef);
+  const hoveredPath = useCodeMapFocusStore((state) => state.hoveredPath);
   const titleOf = (threadId: ThreadId) =>
     shells.find((shell) => shell.id === threadId)?.title || "Untitled thread";
 
@@ -310,6 +313,12 @@ function CodeMapCanvas(props: {
                 ...(mark ? markStyle(mark, mark.isNew, strong) : {}),
                 ...(live ? { boxShadow: `0 0 0 2px ${colorOf(live)}` } : {}),
               };
+              const focus =
+                cell.path === hoveredPath
+                  ? "hovered"
+                  : cell.path === selectedPath
+                    ? "selected"
+                    : undefined;
               const showName = rect.width > 30 && rect.height > 13;
               const showLines = rect.height > 30;
               return (
@@ -320,6 +329,7 @@ function CodeMapCanvas(props: {
                   data-marked={
                     mark ? (mark.sets.length > 1 ? "overlap" : mine ? "mine" : "other") : undefined
                   }
+                  data-focus={focus}
                   data-strength={mark ? (strong ? "strong" : "faint") : undefined}
                   aria-label={
                     mark
@@ -335,6 +345,7 @@ function CodeMapCanvas(props: {
                     mark && (strong || mark.sets.length > 1) && "text-foreground",
                     !mark && scope === "thread" && "opacity-55",
                     live && "z-[2]",
+                    focus && "z-[3] outline-2 -outline-offset-2 outline-primary",
                   )}
                   style={style}
                   onClick={() => openCell(cell)}

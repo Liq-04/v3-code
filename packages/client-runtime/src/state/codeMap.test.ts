@@ -9,6 +9,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   deriveCodeMap,
+  deriveCodeMapOverlaps,
   threadColor,
   threadOverlaps,
   type CodeMapChange,
@@ -227,5 +228,65 @@ describe("threadColor", () => {
     for (let i = 0; i < 200; i++) colors.add(threadColor(ThreadId.make(`t-${i}`)));
     for (const color of colors) expect(ProjectIconColor.literals).toContain(color);
     expect(colors.size).toBeGreaterThan(8);
+  });
+});
+
+describe("deriveCodeMapOverlaps", () => {
+  const APP = "apps/web/src/App.tsx";
+  const overlaps = (threads: CodeMapThreadInput[], changes: Record<string, CodeMapChange[]>) =>
+    deriveCodeMapOverlaps({
+      threads,
+      changesByRoot: new Map(Object.entries(changes)),
+      projectRoot: PROJECT,
+    });
+
+  it.each([
+    {
+      name: "no changes",
+      threads: [thread("a", { worktree: "/wt/a", running: true })],
+      changes: {},
+      expected: [],
+    },
+    {
+      name: "one file shared by two worktrees",
+      threads: [
+        thread("a", { worktree: "/wt/a", running: true }),
+        thread("b", { worktree: "/wt/b" }),
+      ],
+      changes: { "/wt/a": [change(ORCH), change(APP)], "/wt/b": [change(ORCH)] },
+      expected: [{ path: ORCH, threadIds: ids("a", "b") }],
+    },
+    {
+      name: "two shared files",
+      threads: [thread("a", { worktree: "/wt/a" }), thread("b", { worktree: "/wt/b" })],
+      changes: { "/wt/a": [change(ORCH), change(APP)], "/wt/b": [change(APP), change(ORCH)] },
+      expected: [
+        { path: ORCH, threadIds: ids("a", "b") },
+        { path: APP, threadIds: ids("a", "b") },
+      ],
+    },
+    {
+      name: "threads sharing one working tree",
+      threads: [thread("a", { running: true }), thread("b", { finished: true })],
+      changes: { [PROJECT]: [change(ORCH)] },
+      expected: [],
+    },
+    {
+      name: "an archived thread",
+      threads: [
+        thread("a", { worktree: "/wt/a" }),
+        thread("b", { worktree: "/wt/b", archived: true }),
+      ],
+      changes: { "/wt/a": [change(ORCH)], "/wt/b": [change(ORCH)] },
+      expected: [],
+    },
+  ])("$name", ({ threads, changes, expected }) => {
+    expect(overlaps(threads, changes)).toEqual(expected);
+  });
+
+  it("agrees with deriveCodeMap", () => {
+    const threads = [thread("a", { worktree: "/wt/a" }), thread("b", { worktree: "/wt/b" })];
+    const changes = { "/wt/a": [change(ORCH)], "/wt/b": [change(ORCH)] };
+    expect(overlaps(threads, changes)).toEqual(derive(threads, changes).overlaps);
   });
 });

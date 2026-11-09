@@ -13,6 +13,7 @@ import {
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import { Atom, AtomRegistry } from "effect/reactivity";
+import { Profiler } from "react";
 import { expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
 
@@ -35,6 +36,7 @@ vi.mock("~/state/entities", () => ({
 }));
 
 import { CodeMapPanel } from "./CodeMapPanel";
+import { codeMapHoverHandlers, selectCodeMapPath, useCodeMapFocusStore } from "./codeMapFocusStore";
 import { selectActiveRightPanelSurface, useRightPanelStore } from "~/rightPanelStore";
 
 const PROJECT = "/work/app";
@@ -119,6 +121,7 @@ const twoThreads = () =>
 
 function setup(initial: CodeMapView) {
   useRightPanelStore.setState({ byThreadKey: {} });
+  useCodeMapFocusStore.setState({ selected: null, hoveredPath: null });
   state.view = Atom.make(initial);
   const registry = AtomRegistry.make();
   const container = document.createElement("div");
@@ -234,4 +237,40 @@ it("moves the ring and the sprite to the new file, and keeps them when the path 
   expect(sprite(screen, "a")!.dataset.path).toBe(ORCH);
   expect(sprite(screen, "a")!.style.transform).toBe(moved);
   expect(cell(screen, ORCH).style.boxShadow).not.toBe("");
+});
+
+it("outlines the cell of a hovered timeline row without re-rendering the row", async () => {
+  using context = setup(twoThreads());
+  const rowRenders = vi.fn();
+  await using screen = await render(
+    <>
+      <div {...codeMapHoverHandlers}>
+        <Profiler id="row" onRender={rowRenders}>
+          <div data-map-path={ORCH}>Edit orchestrationV2.ts</div>
+          <div>Plain row</div>
+        </Profiler>
+      </div>
+      {context.ui}
+    </>,
+    { container: context.container },
+  );
+  const orchCell = cell(screen, ORCH);
+  await expect.element(orchCell).not.toHaveAttribute("data-focus");
+  const rendersBefore = rowRenders.mock.calls.length;
+
+  await screen.getByText("Edit orchestrationV2.ts").hover();
+  await expect.element(orchCell).toHaveAttribute("data-focus", "hovered");
+  await expect.element(orchCell).toHaveStyle({ outlineStyle: "solid" });
+
+  await screen.getByText("Plain row").hover();
+  await expect.element(orchCell).not.toHaveAttribute("data-focus");
+  expect(rowRenders.mock.calls.length).toBe(rendersBefore);
+});
+
+it("outlines the cell chosen from the header pill", async () => {
+  using context = setup(twoThreads());
+  selectCodeMapPath(ref, ORCH);
+  await using screen = await render(context.ui, { container: context.container });
+  await expect.element(cell(screen, ORCH)).toHaveAttribute("data-focus", "selected");
+  await expect.element(cell(screen, GIT)).not.toHaveAttribute("data-focus");
 });
