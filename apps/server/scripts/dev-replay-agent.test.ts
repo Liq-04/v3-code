@@ -22,6 +22,13 @@ interface AgentMessage {
   readonly error?: { readonly code?: number };
 }
 
+interface ToolUpdate {
+  readonly sessionUpdate: string;
+  readonly toolCallId: string;
+  readonly status: string;
+  readonly locations: ReadonlyArray<{ readonly path: string }>;
+}
+
 /**
  * Runs the agent over stdio and returns every message it sent until each request is answered.
  * Permission requests get `permissionResult`.
@@ -101,6 +108,53 @@ describe("dev replay agent", () => {
     );
     expect(updates).toContain("agent_message_chunk");
     expect(updates).not.toContain("available_commands_update");
+  });
+
+  it.each([
+    [
+      "code-map-a",
+      [
+        "package.json",
+        "apps/web/src/index.css",
+        "packages/contracts/src/orchestrationV2.ts",
+        "apps/web/src/components/map/CodeMap.tsx",
+      ],
+    ],
+    [
+      "code-map-b",
+      [
+        "apps/server/src/orchestration-v2/CheckpointService.ts",
+        "apps/server/src/orchestration-v2/CheckpointService.ts",
+        "packages/contracts/src/orchestrationV2.ts",
+      ],
+    ],
+  ])("%s touches its files in order, each tool call in flight first", (id, paths) => {
+    const scenario = SCENARIOS.find((candidate) => candidate.id === id)!;
+    const [turn] = parseReplayTurns(
+      NodeFS.readFileSync(new URL(scenario.file, import.meta.url), "utf8"),
+    );
+    const updates = turn!.frames.flatMap(({ frame, afterMs }) =>
+      frame.method === "session/update"
+        ? [{ ...(frame.params as { update: ToolUpdate }).update, afterMs }]
+        : [],
+    );
+    const calls = updates.filter((update) => update.sessionUpdate === "tool_call");
+    expect(calls.map((call) => call.locations[0]?.path)).toEqual(
+      paths.map((path) => `<workspace>/${path}`),
+    );
+    for (const call of calls) {
+      expect(call.status).toBe("in_progress");
+      expect(call.afterMs).toBeGreaterThanOrEqual(1500);
+      expect(call.afterMs).toBeLessThanOrEqual(3000);
+      expect(
+        updates.some(
+          (u) =>
+            u.sessionUpdate === "tool_call_update" &&
+            u.toolCallId === call.toolCallId &&
+            u.status === "completed",
+        ),
+      ).toBe(true);
+    }
   });
 
   it("keeps permission requests and the recorded stop reason in order", () => {
