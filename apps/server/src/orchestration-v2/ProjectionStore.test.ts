@@ -1310,13 +1310,30 @@ it.effect("shells name the file the latest tool touched, relative to the thread 
     });
     yield* expectActiveFile(threadId, { path: "src/c.ts", op: "read" });
     yield* updateItem({
-      ...itemOn(threadId, 7),
+      ...itemOn(threadId, 6),
+      id: TurnItemId.make("item:active-file:command-read"),
+      ordinal: 7,
+      type: "command_execution",
+      input: "cat src/e.ts",
+      readPaths: ["/workspace/src/e.ts"],
+    });
+    yield* expectActiveFile(threadId, { path: "src/e.ts", op: "read" });
+    yield* updateItem({
+      ...itemOn(threadId, 6),
+      id: TurnItemId.make("item:active-file:command-plain"),
+      ordinal: 8,
+      type: "command_execution",
+      input: "ls src",
+    });
+    yield* expectActiveFile(threadId, { path: "src/e.ts", op: "read" });
+    yield* updateItem({
+      ...itemOn(threadId, 9),
       runId: rolledBackRun.id,
       nodeId: rolledBackRun.rootNodeId,
       type: "file_change",
       fileName: "/workspace/src/rolled-back.ts",
     });
-    yield* expectActiveFile(threadId, { path: "src/c.ts", op: "read" });
+    yield* expectActiveFile(threadId, { path: "src/e.ts", op: "read" });
 
     yield* read(worktreeThreadId, 1, { file_path: "/worktrees/a/src/d.ts" });
     yield* expectActiveFile(worktreeThreadId, { path: "src/d.ts", op: "read" });

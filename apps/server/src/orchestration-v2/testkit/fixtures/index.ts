@@ -218,6 +218,8 @@ import { assertToolCallWorkspaceNeverClaudeOutput } from "./tool_call_workspace_
 import { assertToolCallWorkspaceNeverOutput } from "./tool_call_workspace_never/codex_output.ts";
 import { toolCallWorkspaceNeverInput } from "./tool_call_workspace_never/input.ts";
 import { assertTurnInterruptClaudeOutput } from "./turn_interrupt/claude_output.ts";
+import { assertCodexFileActivityOutput } from "./codex_file_activity/output.ts";
+import { codexFileActivityInput } from "./codex_file_activity/input.ts";
 import { assertCommandOutputStreamingOutput } from "./command_output_streaming/output.ts";
 import { commandOutputStreamingInput } from "./command_output_streaming/input.ts";
 import { assertTurnInterruptOutput } from "./turn_interrupt/codex_output.ts";
@@ -1919,6 +1921,19 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         ),
         modelSelection: CLAUDE_MODEL_SELECTION,
         assertOutput: assertCommandOutputStreamingOutput,
+      },
+    ],
+  },
+  {
+    name: "codex_file_activity",
+    buildInput: codexFileActivityInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("codex"),
+        transcriptFile: new URL("./codex_file_activity/codex_transcript.ndjson", import.meta.url),
+        modelSelection: CODEX_MODEL_SELECTION,
+        runtimePolicyOverride: WORKSPACE_NEVER_POLICY,
+        assertOutput: assertCodexFileActivityOutput,
       },
     ],
   },

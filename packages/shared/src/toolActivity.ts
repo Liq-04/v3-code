@@ -199,10 +199,14 @@ export const FILE_READ_TOOL_NAME = "Read";
 
 export function isFileTouchingTurnItem(
   item: OrchestrationV2TurnItem,
-): item is Extract<OrchestrationV2TurnItem, { readonly type: "file_change" | "dynamic_tool" }> {
+): item is Extract<
+  OrchestrationV2TurnItem,
+  { readonly type: "file_change" | "dynamic_tool" | "command_execution" }
+> {
   return (
     item.type === "file_change" ||
-    (item.type === "dynamic_tool" && item.toolName === FILE_READ_TOOL_NAME)
+    (item.type === "dynamic_tool" && item.toolName === FILE_READ_TOOL_NAME) ||
+    (item.type === "command_execution" && (item.readPaths?.length ?? 0) > 0)
   );
 }
 
@@ -211,6 +215,10 @@ export function turnItemTouchedFile(
 ): { readonly path: string; readonly op: "read" | "edit" } | undefined {
   if (!isFileTouchingTurnItem(item)) return undefined;
   if (item.type === "file_change") return { path: item.fileName, op: "edit" };
+  if (item.type === "command_execution") {
+    const path = item.readPaths?.[0];
+    return path === undefined ? undefined : { path, op: "read" };
+  }
   const path = collectToolFilePaths(item.input)[0];
   return path === undefined ? undefined : { path, op: "read" };
 }

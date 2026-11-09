@@ -105,6 +105,8 @@ export const TURN_INTERRUPT_MID_TOOL_PROMPT =
 const COMMAND_OUTPUT_STREAMING_COMMAND =
   "for i in 1 2 3 4; do printf '\\033[32mstream line %s\\033[0m\\n' $i; sleep 1; done; printf 'progress 50%%\\rprogress 100%%\\n'";
 export const COMMAND_OUTPUT_STREAMING_PROMPT = `Run this exact shell command in the foreground and wait for it to finish: \`${COMMAND_OUTPUT_STREAMING_COMMAND}\`. Then respond exactly: command output fixture complete`;
+export const CODEX_FILE_ACTIVITY_PROMPT =
+  "Read package.json, then add a trailing newline to it with apply_patch. Then respond exactly: file activity fixture complete";
 export const TURN_INTERRUPT_RECOVERY_PROMPT =
   "Respond with exactly: interrupt recovery fixture complete";
 export const MESSAGE_STEERING_STEER_PROMPT =

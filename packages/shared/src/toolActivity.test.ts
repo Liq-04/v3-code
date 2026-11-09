@@ -58,6 +58,17 @@ describe("toolActivity", () => {
         false,
       ],
       [{ ...base, type: "command_execution", input: "cat /repo/src/a.ts" }, undefined, false],
+      [
+        {
+          ...base,
+          type: "command_execution",
+          input: "cat /repo/src/e.ts /repo/src/f.ts",
+          readPaths: ["/repo/src/e.ts", "/repo/src/f.ts"],
+        },
+        { path: "/repo/src/e.ts", op: "read" },
+        true,
+      ],
+      [{ ...base, type: "command_execution", input: "ls", readPaths: [] }, undefined, false],
     ];
     for (const [item, touched, touching] of cases) {
       expect(turnItemTouchedFile(item)).toEqual(touched);

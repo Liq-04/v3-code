@@ -1724,6 +1724,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
   adapterOptions: CodexAdapterV2Options,
 ) {
   const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+  const pathService = yield* Path.Path;
   const readMcpSession = (threadId: ThreadId | null) =>
     threadId === null ? Effect.undefined : mcpSessions.read(threadId);
   const { clientFactory, digest, fileSystem, idAllocator, serverConfig } = adapterOptions;
@@ -3698,6 +3699,19 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             nativeItemId: item.id,
           });
           const { ordinal, startedAt } = yield* resolveItemPosition(context, item.id);
+          const readPaths = [
+            ...new Set(
+              item.commandActions.flatMap((action) =>
+                action.type === "read"
+                  ? [
+                      pathService.isAbsolute(action.path)
+                        ? action.path
+                        : pathService.resolve(item.cwd, action.path),
+                    ]
+                  : [],
+              ),
+            ),
+          ];
           const node: OrchestrationV2ExecutionNode = {
             id: nodeId,
             threadId: context.projectionThreadId,
@@ -3732,6 +3746,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             updatedAt,
             type: "command_execution",
             input: item.command,
+            ...(readPaths.length === 0 ? {} : { readPaths }),
             ...(item.aggregatedOutput === null || item.aggregatedOutput === undefined
               ? {}
               : { output: item.aggregatedOutput }),
@@ -3746,7 +3761,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           function* (
             context: ActiveCodexTurnContext,
             item: Extract<
-              CodexSchema.V2ItemCompletedNotification__ThreadItem,
+              | CodexSchema.V2ItemStartedNotification__ThreadItem
+              | CodexSchema.V2ItemCompletedNotification__ThreadItem,
               { type: "fileChange" }
             >,
           ) {
@@ -4942,6 +4958,20 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 payload.item.id,
                 Object.fromEntries(payload.item.changes.map(({ path, kind }) => [path, kind])),
               );
+              const artifacts = yield* buildFileChangeArtifacts(context, payload.item);
+              if (artifacts === null) {
+                return;
+              }
+              yield* emitProviderEvent({
+                type: "node.updated",
+                driver: CODEX_PROVIDER,
+                node: artifacts.node,
+              });
+              yield* emitProviderEvent({
+                type: "turn_item.updated",
+                driver: CODEX_PROVIDER,
+                turnItem: artifacts.turnItem,
+              });
               return;
             }
 
