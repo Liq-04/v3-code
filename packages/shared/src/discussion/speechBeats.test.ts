@@ -137,6 +137,21 @@ describe("stepSpeechBeats", () => {
       [[], ["Looking through every single file in this directory right"]],
     ],
     [
+      "points to a table once instead of reading its rows, even as rows arrive",
+      [
+        text(A, "Here are the results.\n\n| Step | Re"),
+        text(
+          A,
+          "Here are the results.\n\n| Step | Result |\n| --- | --- |\n| Test | 12 passed |\n",
+        ),
+        done(
+          A,
+          "Here are the results.\n\n| Step | Result |\n| --- | --- |\n| Test | 12 passed |\n\nAll good.",
+        ),
+      ],
+      [["Here are the results."], ["the table is in the thread"], ["All good."]],
+    ],
+    [
       "waits for a sentence end when fewer than 40 characters are unspoken",
       [text(A, "Okay, so", 0), { type: "tick", at: 60_000 }],
       [[], []],

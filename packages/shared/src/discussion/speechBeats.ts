@@ -1,6 +1,8 @@
 import type { MessageId, RunId } from "@t3tools/contracts";
 
-const CODE_BEAT = "the code is in the thread";
+/** Code and tables are not read aloud; each run of one is spoken once as a pointer. */
+const ASIDE_BEATS = { code: "the code is in the thread", table: "the table is in the thread" };
+type Aside = keyof typeof ASIDE_BEATS;
 const FENCE = "```";
 const CLAUSE_CUT_AFTER_MS = 1_200;
 const CLAUSE_CUT_MIN_CHARS = 40;
@@ -13,7 +15,7 @@ interface MessageSpeech {
   readonly inFence: boolean;
   /** When the unspoken text, which has no sentence end yet, started waiting. */
   readonly waitingSince: number | null;
-  readonly lastBeatWasCode: boolean;
+  readonly lastAside: Aside | null;
 }
 
 export interface SpeechBeats {
@@ -61,7 +63,7 @@ export function stepSpeechBeats(state: SpeechBeats, input: SpeechBeatsInput): Sp
           ...message,
           consumed: Math.max(message.consumed, message.text.length - partialFenceLength(message)),
           waitingSince: null,
-          lastBeatWasCode: false,
+          lastAside: null,
         });
       }
       return { state: { messages, heldRuns: new Set() }, beats: [] };
@@ -83,7 +85,7 @@ export function stepSpeechBeats(state: SpeechBeats, input: SpeechBeatsInput): Sp
         consumed: Math.min(previous?.consumed ?? 0, input.text.length),
         inFence: previous?.inFence ?? false,
         waitingSince: previous?.waitingSince ?? null,
-        lastBeatWasCode: previous?.lastBeatWasCode ?? false,
+        lastAside: previous?.lastAside ?? null,
       };
       const drained = drain(base, input.complete);
       if (input.runId != null && state.heldRuns.has(input.runId)) {
@@ -112,13 +114,18 @@ function drain(message: MessageSpeech, complete: boolean) {
   const { text } = message;
   let index = message.consumed;
   let inFence = message.inFence;
-  let lastBeatWasCode = message.lastBeatWasCode;
+  let lastAside = message.lastAside;
   const beats: Array<string> = [];
+  const aside = (kind: Aside) => {
+    if (lastAside !== kind) beats.push(ASIDE_BEATS[kind]);
+    lastAside = kind;
+  };
   const speak = (raw: string) => {
+    if (isTableRow(raw)) return aside("table");
     const beat = spokenText(raw);
     if (beat === null) return;
     beats.push(beat);
-    lastBeatWasCode = false;
+    lastAside = null;
   };
 
   while (index < text.length) {
@@ -151,14 +158,13 @@ function drain(message: MessageSpeech, complete: boolean) {
       break;
     }
     speak(text.slice(index, fence));
-    if (!lastBeatWasCode) beats.push(CODE_BEAT);
-    lastBeatWasCode = true;
+    aside("code");
     inFence = true;
     index = afterLine(text, fence + FENCE.length);
   }
   const waitingSince = index > message.consumed ? null : message.waitingSince;
   return {
-    message: { ...message, consumed: index, inFence, lastBeatWasCode, waitingSince },
+    message: { ...message, consumed: index, inFence, lastAside, waitingSince },
     beats,
   };
 }
@@ -166,7 +172,9 @@ function drain(message: MessageSpeech, complete: boolean) {
 /** After enough waiting, a long run-on is cut at its last clause so speech never stalls. */
 function settle(message: MessageSpeech, at: number) {
   const pending = message.inFence ? "" : message.text.slice(message.consumed);
-  if (pending.trim() === "") return { message: { ...message, waitingSince: null }, beats: [] };
+  if (pending.trim() === "" || isTableRow(pending)) {
+    return { message: { ...message, waitingSince: null }, beats: [] };
+  }
   const since = message.waitingSince ?? at;
   const cut =
     at - since >= CLAUSE_CUT_AFTER_MS && pending.trim().length >= CLAUSE_CUT_MIN_CHARS
@@ -179,7 +187,7 @@ function settle(message: MessageSpeech, at: number) {
       ...message,
       consumed: message.consumed + cut,
       waitingSince: at,
-      lastBeatWasCode: beat === null && message.lastBeatWasCode,
+      lastAside: beat === null ? message.lastAside : null,
     },
     beats: beat === null ? [] : [beat],
   };
@@ -239,6 +247,11 @@ export function captionText(beat: string): string {
     .replace(/\[[^\]\n]*\]/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/** A row, or the tail of one a sentence end inside a cell split off. */
+function isTableRow(raw: string): boolean {
+  return /^\s*\|/.test(raw) || /\|\s*$/.test(raw);
 }
 
 function spokenText(raw: string): string | null {
