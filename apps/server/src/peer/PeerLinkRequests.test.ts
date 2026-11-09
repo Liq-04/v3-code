@@ -57,6 +57,7 @@ import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as PeerForwarding from "./PeerForwarding.ts";
 import * as PeerLinkRequests from "./PeerLinkRequests.ts";
 import * as PeerLinks from "./PeerLinks.ts";
+import * as DiscussionService from "../discussion/DiscussionService.ts";
 import {
   descriptorOf,
   layerLinkingEnvironment,
@@ -155,7 +156,12 @@ const makeLaptop = Effect.gen(function* () {
     Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
     Layer.provideMerge(PeerLinkRequests.layer),
     Layer.provide(Layer.mock(PeerForwarding.PeerForwarding)({})),
-    Layer.provide(Layer.mock(RemoteDelegation.RemoteDelegation)({})),
+    Layer.provide(
+      Layer.merge(
+        Layer.mock(RemoteDelegation.RemoteDelegation)({}),
+        Layer.mock(DiscussionService.DiscussionService)({}),
+      ),
+    ),
     Layer.provide(Layer.succeedContext(linking)),
     Layer.provide(NodeCrypto.layer),
     Layer.provideMerge(layerThreads),

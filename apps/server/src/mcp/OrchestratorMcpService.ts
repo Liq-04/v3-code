@@ -858,6 +858,7 @@ function threadDetail(
             requestId: projection.thread.titleRegeneration.requestId,
             startedAt: DateTime.formatIso(projection.thread.titleRegeneration.startedAt),
           },
+    discussion: projection.thread.discussion ?? null,
     branch: projection.thread.branch,
     worktreePath: projection.thread.worktreePath,
     parentThreadId: projection.thread.lineage.parentThreadId,

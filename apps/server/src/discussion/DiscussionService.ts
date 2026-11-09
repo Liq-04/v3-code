@@ -108,7 +108,7 @@ export class DiscussionService extends Context.Service<
       readonly threadId: ThreadId;
       readonly discussionId?: DiscussionId;
       readonly reason: DiscussionEndReason;
-    }) => Effect.Effect<void, DiscussionEndError>;
+    }) => Effect.Effect<"ended" | "not_live", DiscussionEndError>;
     /** Serves one media socket until it closes or the call ends. A second socket replaces the first. */
     readonly attach: (discussionId: DiscussionId, socket: Socket.Socket) => Effect.Effect<void>;
     readonly snapshot: (threadId: ThreadId) => Effect.Effect<DiscussionSnapshot | null>;
@@ -679,7 +679,7 @@ const make = Effect.gen(function* () {
           Effect.map(({ thread }) => thread.discussion?.id),
           Effect.mapError((cause) => new DiscussionEndError({ threadId: input.threadId, cause })),
         ));
-      if (discussionId === undefined) return;
+      if (discussionId === undefined) return "not_live";
       if (call !== null && call.discussionId === discussionId) call.endReason = input.reason;
       yield* threads
         .dispatch({
@@ -692,6 +692,7 @@ const make = Effect.gen(function* () {
         .pipe(
           Effect.mapError((cause) => new DiscussionEndError({ threadId: input.threadId, cause })),
         );
+      return "ended";
     },
   );
 

@@ -42,6 +42,7 @@ import { SourceControlRepositoryService } from "../sourceControl/SourceControlRe
 import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
 import { VcsStatusBroadcaster } from "../vcs/VcsStatusBroadcaster.ts";
 import { buildCodexAdditionalContext } from "./CodexDeveloperInstructions.ts";
+import { DiscussionService } from "../discussion/DiscussionService.ts";
 import { DocumentText } from "./DocumentText.ts";
 import { ProviderRegistry } from "./ProviderRegistry.ts";
 import budget from "./agentContextBudget.json" with { type: "json" };
@@ -50,6 +51,7 @@ import budget from "./agentContextBudget.json" with { type: "json" };
 const toolHandlerServices = Layer.mergeAll(
   Layer.mock(AssetSigner)({}),
   Layer.mock(DeviceService)({}),
+  Layer.mock(DiscussionService)({}),
   Layer.mock(DocumentText)({}),
   Layer.mock(GitVcsDriver)({}),
   Layer.mock(GitWorkflowService)({}),

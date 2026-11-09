@@ -39,6 +39,7 @@ import * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
 import { liveThreadShell } from "../mcp/McpToolAccess.testkit.ts";
 import * as PeerForwarding from "./PeerForwarding.ts";
 import * as PeerLinks from "./PeerLinks.ts";
+import * as DiscussionService from "../discussion/DiscussionService.ts";
 import * as PeerLinkRequests from "./PeerLinkRequests.ts";
 import { descriptorOf, layerLinkingEnvironment, linkTo, servePeer } from "./PeerLinks.testkit.ts";
 
@@ -236,7 +237,12 @@ const serveBox = (seen: Ref.Ref<Seen>, linkSession: Ref.Ref<string>) =>
       Layer.provide(Layer.mock(PeerForwarding.PeerForwarding)({})),
       Layer.provide(Layer.mock(RemoteDelegation.RemoteDelegation)({})),
       Layer.provide(Layer.mock(PeerLinkRequests.PeerLinkRequests)({})),
-      Layer.provide(Layer.mock(PeerLinks.PeerLinks)({})),
+      Layer.provide(
+        Layer.merge(
+          Layer.mock(PeerLinks.PeerLinks)({}),
+          Layer.mock(DiscussionService.DiscussionService)({}),
+        ),
+      ),
     ),
   );
 
@@ -316,6 +322,7 @@ const makeLaptop = Effect.gen(function* () {
         ServerSettings.layerTest(),
         Layer.mock(RemoteDelegation.RemoteDelegation)({}),
         Layer.mock(PeerLinkRequests.PeerLinkRequests)({}),
+        Layer.mock(DiscussionService.DiscussionService)({}),
       ),
     ),
     Layer.fresh,
