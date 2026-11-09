@@ -958,6 +958,8 @@ function turnItemText(item: OrchestrationV2TurnItem): string | null {
         : `Asked the user to link ${item.label ?? item.url ?? "an environment"}: ${item.linkStatus}.`;
     case "subagent":
       return item.result ?? item.progress ?? item.prompt;
+    case "discussion":
+      return item.summary ?? `Voice discussion: ${item.discussionStatus}.`;
     case "dynamic_tool":
       return jsonText({ toolName: item.toolName, input: item.input, output: item.output });
   }
