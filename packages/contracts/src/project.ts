@@ -303,6 +303,62 @@ export const ProjectListEntriesResult = Schema.Struct({
 });
 export type ProjectListEntriesResult = typeof ProjectListEntriesResult.Type;
 
+export const ProjectCodeMapInput = Schema.Struct({
+  projectId: ProjectId,
+});
+export type ProjectCodeMapInput = typeof ProjectCodeMapInput.Type;
+
+export const ProjectCodeMapFolder = Schema.Struct({
+  path: Schema.String,
+  fileCount: NonNegativeInt,
+  lines: NonNegativeInt,
+});
+export type ProjectCodeMapFolder = typeof ProjectCodeMapFolder.Type;
+
+// `files` is columnar: `paths[i]` has `lines[i]` lines. Vendored, generated, and over-cap
+// files count only in `folders` and `filesTotal`.
+export const ProjectCodeMapSnapshot = Schema.Struct({
+  treeSha: TrimmedNonEmptyString,
+  baseRef: TrimmedNonEmptyString,
+  files: Schema.Struct({
+    paths: Schema.Array(Schema.String),
+    lines: Schema.Array(NonNegativeInt),
+  }),
+  folders: Schema.Array(ProjectCodeMapFolder),
+  filesTotal: NonNegativeInt,
+});
+export type ProjectCodeMapSnapshot = typeof ProjectCodeMapSnapshot.Type;
+
+export const ProjectCodeMapFailure = Schema.Literals([
+  "project_not_found",
+  "not_a_git_repository",
+  "default_branch_not_found",
+  "git_failed",
+]);
+export type ProjectCodeMapFailure = typeof ProjectCodeMapFailure.Type;
+
+export class ProjectCodeMapError extends Schema.TaggedError<ProjectCodeMapError>()(
+  "ProjectCodeMapError",
+  {
+    failure: ProjectCodeMapFailure,
+    projectId: Schema.optional(ProjectId),
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    switch (this.failure) {
+      case "project_not_found":
+        return "The project was not found.";
+      case "not_a_git_repository":
+        return "The project is not a Git repository.";
+      case "default_branch_not_found":
+        return "The project's default branch could not be resolved.";
+      case "git_failed":
+        return "Git failed while reading the default branch.";
+    }
+  }
+}
+
 // Untracked files git ignores. Wholly ignored folders such as `node_modules`
 // are left out, so the list stays small enough to pick from.
 export const ProjectListIgnoredFilesInput = Schema.Struct({
