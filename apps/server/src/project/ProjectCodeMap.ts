@@ -10,7 +10,7 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 
-const MAX_LISTED_FILES = 20_000;
+const MAX_LISTED_FILES = 200_000;
 const CACHE_CAPACITY = 16;
 const GIT_TIMEOUT_MS = 60_000;
 const GIT_MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
@@ -34,7 +34,7 @@ export class ProjectCodeMap extends Context.Service<
 interface CodeMapEntry {
   readonly path: string;
   readonly lines: number;
-  readonly folded: boolean;
+  readonly vendored: boolean;
 }
 
 /** @public */
@@ -55,11 +55,14 @@ export function foldCodeMap(
     }
   }
   const listed = entries
-    .filter((entry) => !entry.folded)
     .toSorted((a, b) => b.lines - a.lines || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
     .slice(0, maxFiles);
   return {
-    files: { paths: listed.map((entry) => entry.path), lines: listed.map((entry) => entry.lines) },
+    files: {
+      paths: listed.map((entry) => entry.path),
+      lines: listed.map((entry) => entry.lines),
+      vendored: listed.map((entry) => entry.vendored),
+    },
     folders: [...totals]
       .map(([path, total]) => ({ path, ...total }))
       .toSorted((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
@@ -84,15 +87,15 @@ function parseNumstat(stdout: string) {
   return entries;
 }
 
-function parseFoldedPaths(stdout: string) {
-  const folded = new Set<string>();
+function parseVendoredPaths(stdout: string) {
+  const vendored = new Set<string>();
   const fields = stdout.split("\0");
   for (let index = 0; index + 2 < fields.length; index += 3) {
     if (fields[index + 2] === "set" || fields[index + 2] === "true") {
-      folded.add(fields[index]!);
+      vendored.add(fields[index]!);
     }
   }
-  return folded;
+  return vendored;
 }
 
 const shortRefName = (ref: string) => ref.replace(/^refs\/(?:heads|remotes)\//, "");
@@ -183,12 +186,12 @@ export const make = Effect.gen(function* () {
       timeoutMs: GIT_TIMEOUT_MS,
       maxOutputBytes: GIT_MAX_OUTPUT_BYTES,
     });
-    const foldedPaths = parseFoldedPaths(attributes.stdout);
+    const vendoredPaths = parseVendoredPaths(attributes.stdout);
     return {
       treeSha: key.treeSha,
       baseRef: key.baseRef,
       ...foldCodeMap(
-        parsed.map((entry) => ({ ...entry, folded: foldedPaths.has(entry.path) })),
+        parsed.map((entry) => ({ ...entry, vendored: vendoredPaths.has(entry.path) })),
         MAX_LISTED_FILES,
       ),
     } satisfies ProjectCodeMapSnapshot;

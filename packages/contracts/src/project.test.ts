@@ -186,7 +186,7 @@ describe("ProjectCodeMapSnapshot", () => {
     const snapshot = {
       treeSha: "abc123",
       baseRef: "main",
-      files: { paths: ["src/a.ts", "logo.png"], lines: [12, 0] },
+      files: { paths: ["src/a.ts", "logo.png"], lines: [12, 0], vendored: [false, true] },
       folders: [{ path: "src", fileCount: 1, lines: 12 }],
       filesTotal: 2,
     };
@@ -195,7 +195,7 @@ describe("ProjectCodeMapSnapshot", () => {
     expect(() =>
       decodeCodeMapSnapshot({
         ...snapshot,
-        files: { paths: ["a"], lines: [-1] },
+        files: { paths: ["a"], lines: [-1], vendored: [false] },
       }),
     ).toThrow();
   });

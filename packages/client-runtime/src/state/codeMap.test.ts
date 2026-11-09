@@ -25,6 +25,7 @@ const snapshot: ProjectCodeMapSnapshot = {
   files: {
     paths: [ORCH, "packages/contracts/src/git.ts", "apps/web/src/App.tsx", "README.md"],
     lines: [4000, 800, 300, 40],
+    vendored: [false, false, false, false],
   },
   folders: [
     { path: "apps", fileCount: 1, lines: 300 },
