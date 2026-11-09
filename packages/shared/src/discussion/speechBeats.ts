@@ -233,6 +233,14 @@ function partialFenceLength(message: MessageSpeech) {
     : trailingBackticks(message.text);
 }
 
+/** A beat as captioned: audio tags like `[chuckles]` are performed, not shown. */
+export function captionText(beat: string): string {
+  return beat
+    .replace(/\[[^\]\n]*\]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function spokenText(raw: string): string | null {
   const text = raw
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
