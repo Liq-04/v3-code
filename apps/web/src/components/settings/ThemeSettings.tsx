@@ -27,6 +27,7 @@ import {
   GROVE_THEME,
   IRIS_THEME,
   OCEAN_THEME,
+  VERDIGRIS_THEME,
 } from "../../themePalette";
 import {
   AlertDialog,
@@ -55,6 +56,7 @@ import {
 import { ThemeWireframe } from "./ThemeWireframe";
 
 const MAINTAINER_THEMES: ReadonlyArray<ThemeDefinition> = [
+  VERDIGRIS_THEME,
   T3_CHAT_THEME,
   GROVE_THEME,
   OCEAN_THEME,
