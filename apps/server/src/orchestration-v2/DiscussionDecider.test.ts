@@ -188,7 +188,26 @@ describe("decideDiscussionCommand", () => {
       runs: [],
       items: [endedItem],
       command: record("They agreed to split the PR."),
-      expect: { item: { summary: "They agreed to split the PR." }, summarize: false },
+      expect: {
+        item: { summary: "They agreed to split the PR.", status: "completed" },
+        summarize: false,
+      },
+    },
+    {
+      name: "summary.record of a failed summary marks the item failed",
+      thread,
+      runs: [],
+      items: [endedItem],
+      command: record(null),
+      expect: { item: { summary: null, status: "failed" }, summarize: false },
+    },
+    {
+      name: "summary.record after a failed summary changes nothing",
+      thread,
+      runs: [],
+      items: [{ ...endedItem, status: "failed" }],
+      command: record("Late."),
+      expect: { item: null, summarize: false },
     },
     {
       name: "summary.record keeps a summary already written",

@@ -162,13 +162,19 @@ export function decideDiscussionCommand(input: {
     case "thread.discussion.summary.record": {
       const item = findItem(input.items, command.discussionId);
       if (item === undefined) return Result.fail(DISCUSSION_FAILURE.unknown);
-      // A live call has no summary yet, and a lost one never gets one.
-      if (item.discussionStatus !== "ended" || item.summary !== null) {
+      // A live call has no summary yet, a lost one never gets one, and a recorded one is final.
+      if (item.discussionStatus !== "ended" || item.summary !== null || item.status === "failed") {
         return Result.succeed({ thread, item: null, summarize: false });
       }
       return Result.succeed({
         thread,
-        item: { ...item, summary: command.summary, updatedAt: now },
+        item: {
+          ...item,
+          summary: command.summary,
+          // `failed` tells clients the summary will not come; `completed` with no summary is pending.
+          status: command.summary === null ? "failed" : item.status,
+          updatedAt: now,
+        },
         summarize: false,
       });
     }
