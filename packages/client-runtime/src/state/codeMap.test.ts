@@ -1,6 +1,8 @@
 import {
   ProjectIconColor,
+  ProjectId,
   ProviderInstanceId,
+  RunId,
   ThreadId,
   type ProjectCodeMapSnapshot,
 } from "@t3tools/contracts";
@@ -8,20 +10,34 @@ import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  checkoutRelativePath,
   deriveCodeMap,
   deriveCodeMapOverlaps,
+  observeReadTrails,
+  repositoryGroupOf,
   threadColor,
   threadOverlaps,
   type CodeMapChange,
+  type CodeMapReadTrail,
   type CodeMapThreadInput,
+  type DeriveCodeMapInput,
 } from "./codeMap.ts";
 
 const PROJECT = "/work/app";
+const PROJECT_ID = ProjectId.make("app");
+const OTHER_PROJECT = "/work/app-second-checkout";
+const OTHER_PROJECT_ID = ProjectId.make("app-second-checkout");
+const PROJECT_ROOTS = new Map([
+  [PROJECT_ID, PROJECT],
+  [OTHER_PROJECT_ID, OTHER_PROJECT],
+]);
 const ORCH = "packages/contracts/src/orchestrationV2.ts";
 
 const snapshot: ProjectCodeMapSnapshot = {
   treeSha: "tree",
   baseRef: "main",
+  defaultBaseRef: "main",
+  checkouts: [PROJECT, "/wt/a", "/work/app/.worktrees/nested"],
   files: {
     paths: [ORCH, "packages/contracts/src/git.ts", "apps/web/src/App.tsx", "README.md"],
     lines: [4000, 800, 300, 40],
@@ -49,12 +65,15 @@ function thread(
     archived?: boolean;
     subagentOf?: string;
     root?: string;
-    active?: { path: string; op: "read" | "edit" };
+    project?: ProjectId;
+    run?: string;
+    active?: { path: string; op: "read" | "edit"; at?: string };
   } = {},
 ): CodeMapThreadInput {
   const status = opts.running ? "running" : opts.finished ? "completed" : undefined;
   return {
     id: ThreadId.make(id),
+    projectId: opts.project ?? PROJECT_ID,
     worktreePath: opts.worktree ?? null,
     archivedAt: opts.archived ? "2026-06-01T00:00:00.000Z" : null,
     deletedAt: null,
@@ -79,9 +98,11 @@ function thread(
         }
       : null,
     source: {
+      activeRunId: opts.running ? RunId.make(opts.run ?? `run:${id}`) : null,
       activeFile: opts.active && {
-        ...opts.active,
-        at: DateTime.makeUnsafe("2026-06-01T00:00:00.000Z"),
+        path: opts.active.path,
+        op: opts.active.op,
+        at: DateTime.makeUnsafe(opts.active.at ?? "2026-06-01T00:00:00.000Z"),
       },
     },
   };
@@ -93,12 +114,20 @@ const change = (path: string, insertions = 3, deletions = 1): CodeMapChange => (
   deletions,
 });
 
-function derive(threads: CodeMapThreadInput[], changes: Record<string, CodeMapChange[]>) {
+function derive(
+  threads: CodeMapThreadInput[],
+  changes: Record<string, CodeMapChange[]>,
+  reads: Partial<Pick<DeriveCodeMapInput, "backfilledReads" | "observedReads">> = {},
+) {
   return deriveCodeMap({
     snapshot,
     threads,
     changesByRoot: new Map(Object.entries(changes)),
-    projectRoot: PROJECT,
+    projectRoots: PROJECT_ROOTS,
+    checkoutRoots: [...PROJECT_ROOTS.values()],
+    backfilledReads: new Map(),
+    observedReads: new Map(),
+    ...reads,
   });
 }
 
@@ -107,7 +136,13 @@ const ids = (...names: string[]) => names.map((name) => ThreadId.make(name));
 describe("deriveCodeMap", () => {
   it("marks one thread's changed file with its counts and gives a running thread a sprite", () => {
     const model = derive(
-      [thread("a", { worktree: "/wt/a", running: true, active: { path: ORCH, op: "edit" } })],
+      [
+        thread("a", {
+          worktree: "/wt/a",
+          running: true,
+          active: { path: `/wt/a/${ORCH}`, op: "edit" },
+        }),
+      ],
       { "/wt/a": [change(ORCH, 5, 2)] },
     );
     expect(model.threads).toEqual([
@@ -228,6 +263,169 @@ describe("deriveCodeMap", () => {
   });
 });
 
+describe("repository group", () => {
+  it("shows threads of every project that is a checkout of the map's repository", () => {
+    const identity = (canonicalKey: string) => ({
+      canonicalKey,
+      locator: { source: "git-remote" as const, remoteName: "origin", remoteUrl: canonicalKey },
+    });
+    const projects = [
+      { id: PROJECT_ID, repositoryIdentity: identity("github.com/acme/app") },
+      { id: OTHER_PROJECT_ID, repositoryIdentity: identity("github.com/acme/app") },
+      { id: ProjectId.make("unrelated"), repositoryIdentity: identity("github.com/acme/other") },
+      { id: ProjectId.make("no-identity"), repositoryIdentity: null },
+    ];
+    expect(repositoryGroupOf(projects, PROJECT_ID).map((project) => project.id)).toEqual([
+      PROJECT_ID,
+      OTHER_PROJECT_ID,
+    ]);
+    expect(
+      repositoryGroupOf(projects, ProjectId.make("no-identity")).map((project) => project.id),
+    ).toEqual(["no-identity"]);
+
+    const model = derive(
+      [
+        thread("a", { running: true }),
+        thread("b", { project: OTHER_PROJECT_ID, running: true }),
+        thread("c", { project: ProjectId.make("unrelated"), running: true }),
+      ],
+      { [PROJECT]: [change(ORCH)], [OTHER_PROJECT]: [change(ORCH)] },
+    );
+    expect(model.threads.map((t) => [t.threadId, t.root])).toEqual([
+      ["a", PROJECT],
+      ["b", OTHER_PROJECT],
+    ]);
+    expect(model.overlaps).toEqual([{ path: ORCH, threadIds: ids("a", "b") }]);
+  });
+
+  it.each([
+    { name: "inside the thread's own checkout", path: `/wt/a/${ORCH}`, expected: ORCH },
+    { name: "inside another checkout", path: `${PROJECT}/README.md`, expected: "README.md" },
+    {
+      name: "inside a checkout nested in another",
+      path: `${PROJECT}/.worktrees/nested/${ORCH}`,
+      expected: ORCH,
+    },
+    {
+      name: "inside a worktree the snapshot has not listed yet",
+      path: "/wt/unlisted/README.md",
+      expected: "README.md",
+    },
+    { name: "outside every checkout", path: "/etc/hosts", expected: null },
+    { name: "a checkout root itself", path: "/wt/a", expected: null },
+  ])("places a sprite on a path $name", ({ path, expected }) => {
+    const model = derive(
+      [
+        thread("a", { worktree: "/wt/a", running: true, active: { path, op: "read" } }),
+        thread("b", { worktree: "/wt/unlisted" }),
+      ],
+      {},
+    );
+    expect(model.sprites[0]!.path).toBe(expected);
+  });
+
+  it("resolves through the deepest root whatever order the roots come in", () => {
+    const roots = ["/repo", "/repo/.worktrees/x", "/repo/.worktrees"];
+    for (const order of [roots, roots.toReversed()]) {
+      expect(checkoutRelativePath("/repo/.worktrees/x/src/a.ts", order)).toBe("src/a.ts");
+    }
+  });
+});
+
+describe("read trail", () => {
+  const A = `/wt/a/${ORCH}`;
+  const B = "/wt/a/README.md";
+  const C = `${PROJECT}/apps/web/src/App.tsx`;
+  const running = (active?: { path: string; op: "read" | "edit"; at?: string }, run = "run:1") =>
+    thread("a", { worktree: "/wt/a", running: true, run, ...(active ? { active } : {}) });
+  const observe = (shells: ReadonlyArray<CodeMapThreadInput>) => {
+    let trails: ReadonlyMap<ThreadId, CodeMapReadTrail> = new Map();
+    for (const shell of shells) trails = observeReadTrails(trails, [shell]);
+    return trails;
+  };
+
+  it("joins the server's backfill with the reads seen since, in the reader's colour", () => {
+    const shells = [
+      running({ path: A, op: "read", at: "2026-06-01T00:00:01.000Z" }),
+      running({ path: B, op: "read", at: "2026-06-01T00:00:02.000Z" }),
+      running({ path: "/wt/a/NEW.md", op: "edit", at: "2026-06-01T00:00:03.000Z" }),
+      running({ path: "/etc/hosts", op: "read", at: "2026-06-01T00:00:04.000Z" }),
+      running({ path: C, op: "read", at: "2026-06-01T00:00:05.000Z" }),
+    ];
+    const observedReads = observe(shells);
+    // The first shell's file predates the observation, so only the backfill can name it.
+    expect(observedReads.get(ThreadId.make("a"))?.paths).toEqual([B, "/etc/hosts", C]);
+
+    const model = derive(
+      [shells.at(-1)!],
+      {},
+      {
+        backfilledReads: new Map([[ThreadId.make("a"), [A, B]]]),
+        observedReads,
+      },
+    );
+    expect(model.reads).toEqual([
+      { path: ORCH, threadIds: ids("a") },
+      { path: "README.md", threadIds: ids("a") },
+      { path: "apps/web/src/App.tsx", threadIds: ids("a") },
+    ]);
+  });
+
+  it("counts a subagent's reads for its root thread and names a shared file once", () => {
+    const model = derive(
+      [
+        thread("a", { worktree: "/wt/a", running: true }),
+        thread("s", { subagentOf: "a", running: true }),
+        thread("b", { project: OTHER_PROJECT_ID, running: true }),
+      ],
+      {},
+      {
+        backfilledReads: new Map([
+          [ThreadId.make("a"), [A]],
+          [ThreadId.make("s"), [A, B]],
+          [ThreadId.make("b"), [`${OTHER_PROJECT}/README.md`]],
+        ]),
+      },
+    );
+    expect(model.reads).toEqual([
+      { path: ORCH, threadIds: ids("a") },
+      { path: "README.md", threadIds: ids("a", "b") },
+    ]);
+  });
+
+  it("clears when the thread stops running and starts empty on its next run", () => {
+    const first = running({ path: A, op: "read", at: "2026-06-01T00:00:01.000Z" });
+    const second = running({ path: B, op: "read", at: "2026-06-01T00:00:02.000Z" });
+    const stopped = thread("a", {
+      worktree: "/wt/a",
+      finished: true,
+      active: { path: B, op: "read", at: "2026-06-01T00:00:02.000Z" },
+    });
+    const trails = observe([first, second]);
+    expect(observeReadTrails(trails, [second])).toBe(trails);
+
+    const afterStop = observeReadTrails(trails, [stopped]);
+    expect(afterStop.size).toBe(0);
+    expect(
+      derive(
+        [stopped],
+        { "/wt/a": [change(ORCH)] },
+        {
+          backfilledReads: new Map([[ThreadId.make("a"), [A, B]]]),
+          observedReads: trails,
+        },
+      ).reads,
+    ).toEqual([]);
+
+    const nextRun = running({ path: B, op: "read", at: "2026-06-01T00:00:02.000Z" }, "run:2");
+    expect(observeReadTrails(trails, [nextRun]).get(ThreadId.make("a"))).toMatchObject({
+      runId: "run:2",
+      paths: [],
+    });
+    expect(derive([nextRun], {}, { observedReads: trails }).reads).toEqual([]);
+  });
+});
+
 describe("subagents", () => {
   const sub = (id: string, parent: string, opts: Parameters<typeof thread>[1] = {}) =>
     thread(id, { subagentOf: parent, ...opts });
@@ -237,7 +435,7 @@ describe("subagents", () => {
       name: "a running subagent is a small sprite in the root's colour",
       threads: [
         thread("a", { worktree: "/wt/a", running: true }),
-        sub("s", "a", { running: true, active: { path: ORCH, op: "read" } }),
+        sub("s", "a", { running: true, active: { path: `${PROJECT}/${ORCH}`, op: "read" } }),
       ],
       expected: [
         {
@@ -336,7 +534,7 @@ describe("deriveCodeMapOverlaps", () => {
     deriveCodeMapOverlaps({
       threads,
       changesByRoot: new Map(Object.entries(changes)),
-      projectRoot: PROJECT,
+      projectRoots: PROJECT_ROOTS,
     });
 
   it.each([

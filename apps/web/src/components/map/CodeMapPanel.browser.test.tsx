@@ -7,7 +7,9 @@ import {
 } from "@t3tools/client-runtime/state/code-map";
 import {
   EnvironmentId,
+  ProjectId,
   ProviderInstanceId,
+  RunId,
   ThreadId,
   type ProjectCodeMapSnapshot,
 } from "@t3tools/contracts";
@@ -29,10 +31,6 @@ vi.mock("~/state/codeMap", () => ({
 }));
 vi.mock("~/state/entities", () => ({
   useThreadShell: () => ({ projectId: "project" }),
-  useThreadShellsForProjectRefs: () => [
-    { id: "a", title: "Code map" },
-    { id: "b", title: "Checkpoint diff stalls" },
-  ],
 }));
 
 import { CodeMapPanel } from "./CodeMapPanel";
@@ -41,6 +39,7 @@ import { buildWorld, rectOf } from "./mapWorld";
 import { selectActiveRightPanelSurface, useRightPanelStore } from "~/rightPanelStore";
 
 const PROJECT = "/work/app";
+const PROJECT_ID = ProjectId.make("project");
 const CHAT_VIEW = "apps/web/ChatView.tsx";
 const INDEX_CSS = "apps/web/index.css";
 const ORCH = "packages/contracts/orchestrationV2.ts";
@@ -50,6 +49,8 @@ const ref = scopeThreadRef(EnvironmentId.make("environment"), ThreadId.make("a")
 const snapshot: ProjectCodeMapSnapshot = {
   treeSha: "8e1581ad8f00",
   baseRef: "main",
+  defaultBaseRef: "main",
+  checkouts: [PROJECT],
   files: {
     paths: [CHAT_VIEW, INDEX_CSS, ORCH, GIT],
     lines: [1600, 1300, 4200, 700],
@@ -68,9 +69,11 @@ function thread(
   id: string,
   opts: { running?: boolean; finished?: boolean; active?: string | null; subagentOf?: string },
 ): CodeMapThreadInput {
+  const root = `/wt/${opts.subagentOf ?? id}`;
   return {
     id: ThreadId.make(id),
-    worktreePath: `/wt/${opts.subagentOf ?? id}`,
+    projectId: PROJECT_ID,
+    worktreePath: root,
     archivedAt: null,
     deletedAt: null,
     lineage: {
@@ -92,8 +95,13 @@ function thread(
       updatedAt: "2026-06-01T00:00:00.000Z",
     },
     source: {
+      activeRunId: opts.running ? RunId.make(`run:${id}`) : null,
       activeFile: opts.active
-        ? { path: opts.active, op: "edit", at: DateTime.makeUnsafe("2026-06-01T00:00:00.000Z") }
+        ? {
+            path: `${root}/${opts.active}`,
+            op: "edit",
+            at: DateTime.makeUnsafe("2026-06-01T00:00:00.000Z"),
+          }
         : undefined,
     },
   };
@@ -109,13 +117,23 @@ function view(
     snapshot,
     threads,
     changesByRoot: new Map(Object.entries(changes)),
-    projectRoot: PROJECT,
+    projectRoots: new Map([[PROJECT_ID, PROJECT]]),
+    checkoutRoots: [],
+    backfilledReads: new Map(),
+    observedReads: new Map(),
   });
   return {
     status: "ready",
     treeSha: snapshot.treeSha,
+    baseKey: "repo",
     baseRef: snapshot.baseRef,
+    defaultBaseRef: snapshot.defaultBaseRef,
+    chosenBaseRef: null,
     files: snapshot.files,
+    threadTitles: new Map([
+      [ThreadId.make("a"), "Code map"],
+      [ThreadId.make("b"), "Checkpoint diff stalls"],
+    ]),
     model,
   };
 }

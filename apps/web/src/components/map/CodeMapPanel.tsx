@@ -22,7 +22,7 @@ import { observeResize } from "~/lib/observeResize";
 import { projectIconColorValue } from "~/projectIconColors";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { codeMapSnapshotAtom, codeMapViewAtom, type CodeMapView } from "~/state/codeMap";
-import { useThreadShell, useThreadShellsForProjectRefs } from "~/state/entities";
+import { useThreadShell } from "~/state/entities";
 import { buildThreadRouteParams } from "~/threadRoutes";
 
 import { CodeMapCanvas, markView, type MapScope } from "./CodeMapCanvas";
@@ -59,16 +59,16 @@ export function CodeMapPanel(props: { readonly threadRef: ScopedThreadRef }) {
     );
   }
   if (view.status === "error") {
-    return <CodeMapUnavailable projectRef={projectRef} message={view.message} />;
+    return <CodeMapUnavailable projectRef={projectRef} view={view} />;
   }
-  return <CodeMapStage threadRef={threadRef} projectRef={projectRef} view={view} />;
+  return <CodeMapStage threadRef={threadRef} view={view} />;
 }
 
 function CodeMapUnavailable(props: {
   readonly projectRef: ScopedProjectRef;
-  readonly message: string;
+  readonly view: Extract<CodeMapView, { status: "error" }>;
 }) {
-  const refresh = useAtomRefresh(codeMapSnapshotAtom(props.projectRef));
+  const refresh = useAtomRefresh(codeMapSnapshotAtom(props.projectRef, props.view.chosenBaseRef));
   return (
     <Empty size="compact" className="min-h-0">
       <EmptyMedia variant="icon">
@@ -76,7 +76,7 @@ function CodeMapUnavailable(props: {
       </EmptyMedia>
       <EmptyHeader>
         <EmptyTitle>Map unavailable</EmptyTitle>
-        <EmptyDescription>{props.message}</EmptyDescription>
+        <EmptyDescription>{props.view.message}</EmptyDescription>
       </EmptyHeader>
       <button
         type="button"
@@ -133,15 +133,10 @@ function standingPaths(
 
 const sameSize = (a: Size, b: Size) => a.width === b.width && a.height === b.height;
 
-function CodeMapStage(props: {
-  readonly threadRef: ScopedThreadRef;
-  readonly projectRef: ScopedProjectRef;
-  readonly view: ReadyView;
-}) {
+function CodeMapStage(props: { readonly threadRef: ScopedThreadRef; readonly view: ReadyView }) {
   const { threadRef, view } = props;
   const { model } = view;
   const router = useRouter();
-  const shells = useThreadShellsForProjectRefs([props.projectRef]);
   const selectedPath = useSelectedCodeMapPath(threadRef);
   const hoveredPath = useCodeMapFocusStore((state) => state.hoveredPath);
   const [scope, setScope] = useState<MapScope>("thread");
@@ -152,8 +147,7 @@ function CodeMapStage(props: {
   const [cache, setCache] = useState<WorldCache | null>(null);
   const [standingByThread, setStandingByThread] = useState(NO_PATHS);
 
-  const titleOf = (threadId: ThreadId) =>
-    shells.find((shell) => shell.id === threadId)?.title || "Untitled thread";
+  const titleOf = (threadId: ThreadId) => view.threadTitles.get(threadId) || "Untitled thread";
 
   const observeBox = (element: HTMLDivElement | null) => {
     if (!element) return;

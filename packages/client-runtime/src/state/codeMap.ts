@@ -1,9 +1,15 @@
 import {
   ProjectIconColor,
+  repositoryGroupingKeyOf,
   type OrchestrationV2ThreadShell,
   type ProjectCodeMapSnapshot,
+  type ProjectId,
+  type RepositoryIdentity,
+  type RunId,
   type ThreadId,
 } from "@t3tools/contracts";
+import { workspaceRelativeFilePath } from "@t3tools/shared/path";
+import * as DateTime from "effect/DateTime";
 
 import { threadRuntimeIsActive, type EnvironmentThreadShell } from "./models.ts";
 import { isThreadWorking } from "./threadInbox.ts";
@@ -51,9 +57,15 @@ export interface CodeMapSprite {
   readonly parentThreadId: ThreadId | null;
   /** The thread whose `threadColor` paints the sprite: the root thread for a subagent. */
   readonly colorThreadId: ThreadId;
-  /** Null means the latest touch named no path inside the root: keep the sprite where it was. */
+  /** Null means the latest touch named no path inside a checkout: keep the sprite where it was. */
   readonly path: string | null;
   readonly op: "read" | "edit" | null;
+}
+
+export interface CodeMapRead {
+  readonly path: string;
+  /** The threads whose colours paint the mark: a subagent's reads count for its root thread. */
+  readonly threadIds: ReadonlyArray<ThreadId>;
 }
 
 export interface CodeMap {
@@ -61,11 +73,22 @@ export interface CodeMap {
   readonly marks: ReadonlyArray<CodeMapPathMark>;
   readonly overlaps: ReadonlyArray<CodeMapOverlap>;
   readonly sprites: ReadonlyArray<CodeMapSprite>;
+  /** Files the running threads read during their current runs. */
+  readonly reads: ReadonlyArray<CodeMapRead>;
+}
+
+/** The reads seen arriving on one thread's shell during one run. Paths are absolute. */
+export interface CodeMapReadTrail {
+  readonly runId: RunId;
+  /** The active file last folded in, so the same shell value is not counted twice. */
+  readonly seen: string;
+  readonly paths: ReadonlyArray<string>;
 }
 
 export type CodeMapThreadInput = Pick<
   EnvironmentThreadShell,
   | "id"
+  | "projectId"
   | "worktreePath"
   | "archivedAt"
   | "deletedAt"
@@ -77,14 +100,55 @@ export type CodeMapThreadInput = Pick<
   | "latestRun"
   | "runtime"
   | "lineage"
-> & { readonly source: Pick<OrchestrationV2ThreadShell, "activeFile"> };
+> & { readonly source: Pick<OrchestrationV2ThreadShell, "activeFile" | "activeRunId"> };
 
 export interface DeriveCodeMapInput {
   readonly snapshot: ProjectCodeMapSnapshot;
-  /** The project's threads. Archived and deleted ones are skipped here. */
+  /** Threads of every project in the map. Archived and deleted ones are skipped here. */
   readonly threads: ReadonlyArray<CodeMapThreadInput>;
   readonly changesByRoot: ReadonlyMap<string, ReadonlyArray<CodeMapChange>>;
-  readonly projectRoot: string;
+  /** Where each project's threads run when they have no worktree. Other projects' threads are skipped. */
+  readonly projectRoots: ReadonlyMap<ProjectId, string>;
+  /** Checkout roots known beyond the snapshot's and the threads' own worktrees. */
+  readonly checkoutRoots: ReadonlyArray<string>;
+  /** Absolute paths the server lists for each thread's current run. */
+  readonly backfilledReads: ReadonlyMap<ThreadId, ReadonlyArray<string>>;
+  readonly observedReads: ReadonlyMap<ThreadId, CodeMapReadTrail>;
+}
+
+interface CodeMapProject {
+  readonly id: ProjectId;
+  readonly repositoryIdentity?: RepositoryIdentity | null | undefined;
+}
+
+/** A key shared by every project that is a checkout of the same repository, or null without an identity. */
+export function repositoryGroupKey(project: CodeMapProject): string | null {
+  return project.repositoryIdentity ? repositoryGroupingKeyOf(project.repositoryIdentity) : null;
+}
+
+/** The projects that are checkouts of `projectId`'s repository, itself included. */
+export function repositoryGroupOf<P extends CodeMapProject>(
+  projects: ReadonlyArray<P>,
+  projectId: ProjectId,
+): ReadonlyArray<P> {
+  const own = projects.find((project) => project.id === projectId);
+  if (own === undefined) return [];
+  const key = repositoryGroupKey(own);
+  return key === null ? [own] : projects.filter((project) => repositoryGroupKey(project) === key);
+}
+
+/** `path` relative to the deepest of `roots` that contains it, or null when none does. */
+export function checkoutRelativePath(path: string, roots: Iterable<string>): string | null {
+  let best: string | null = null;
+  let bestRootLength = -1;
+  for (const root of roots) {
+    if (root.length <= bestRootLength) continue;
+    const relative = workspaceRelativeFilePath(path, root);
+    if (relative === null || relative === ".") continue;
+    best = relative;
+    bestRootLength = root.length;
+  }
+  return best;
 }
 
 const THREAD_COLORS = ProjectIconColor.literals.filter((color) => color !== "gray");
@@ -110,15 +174,22 @@ function parentOf(path: string): string {
   return slash === -1 ? "" : path.slice(0, slash);
 }
 
-type MarkSetsInput = Pick<DeriveCodeMapInput, "threads" | "changesByRoot" | "projectRoot">;
+type MarkSetsInput = Pick<DeriveCodeMapInput, "threads" | "changesByRoot" | "projectRoots">;
+
+/** A working thread or subagent: what draws a sprite and leaves a read trail. */
+interface CodeMapActor {
+  readonly thread: CodeMapThreadInput;
+  readonly kind: CodeMapSprite["kind"];
+  readonly parentThreadId: ThreadId | null;
+  readonly colorThreadId: ThreadId;
+}
 
 function collectMarkSets(input: MarkSetsInput) {
-  const projectRoot = normalizeRoot(input.projectRoot);
   const changes = new Map<string, ReadonlyArray<CodeMapChange>>();
   for (const [root, files] of input.changesByRoot) changes.set(normalizeRoot(root), files);
   const threads: CodeMapThread[] = [];
   const idsByRoot = new Map<string, ThreadId[]>();
-  const sprites: CodeMapSprite[] = [];
+  const actors: CodeMapActor[] = [];
   const liveIds = new Set<ThreadId>();
   for (const thread of input.threads) {
     if (thread.archivedAt === null && thread.deletedAt === null) liveIds.add(thread.id);
@@ -128,19 +199,13 @@ function collectMarkSets(input: MarkSetsInput) {
     if (thread.lineage.relationshipToParent === "subagent") {
       const rootId = thread.lineage.rootThreadId;
       if (isThreadWorking(thread) && liveIds.has(rootId)) {
-        const active = thread.source.activeFile;
-        sprites.push({
-          threadId: thread.id,
-          kind: "subagent",
-          parentThreadId: rootId,
-          colorThreadId: rootId,
-          path: active?.path ?? null,
-          op: active?.op ?? null,
-        });
+        actors.push({ thread, kind: "subagent", parentThreadId: rootId, colorThreadId: rootId });
       }
       continue;
     }
-    const root = normalizeRoot(thread.worktreePath ?? projectRoot);
+    const threadRoot = thread.worktreePath ?? input.projectRoots.get(thread.projectId);
+    if (threadRoot === undefined) continue;
+    const root = normalizeRoot(threadRoot);
     const running = isThreadWorking(thread);
     if (!running && !changes.get(root)?.length) continue;
     threads.push({
@@ -153,15 +218,7 @@ function collectMarkSets(input: MarkSetsInput) {
     if (ids) ids.push(thread.id);
     else idsByRoot.set(root, [thread.id]);
     if (running) {
-      const active = thread.source.activeFile;
-      sprites.push({
-        threadId: thread.id,
-        kind: "agent",
-        parentThreadId: null,
-        colorThreadId: thread.id,
-        path: active?.path ?? null,
-        op: active?.op ?? null,
-      });
+      actors.push({ thread, kind: "agent", parentThreadId: null, colorThreadId: thread.id });
     }
   }
 
@@ -175,7 +232,46 @@ function collectMarkSets(input: MarkSetsInput) {
     }
   }
 
-  return { threads, sprites, setsByPath };
+  return { threads, actors, setsByPath };
+}
+
+const isLiveThread = (thread: CodeMapThreadInput) =>
+  thread.archivedAt === null && thread.deletedAt === null;
+
+/**
+ * Folds each working thread's latest read into its run's trail and drops the trails of threads
+ * that stopped. Returns `previous` itself when nothing changed.
+ */
+export function observeReadTrails(
+  previous: ReadonlyMap<ThreadId, CodeMapReadTrail>,
+  threads: ReadonlyArray<CodeMapThreadInput>,
+): ReadonlyMap<ThreadId, CodeMapReadTrail> {
+  let next: Map<ThreadId, CodeMapReadTrail> | null = null;
+  const working = new Set<ThreadId>();
+  for (const thread of threads) {
+    const runId = thread.source.activeRunId;
+    if (runId === null || !isLiveThread(thread) || !isThreadWorking(thread)) continue;
+    working.add(thread.id);
+    const active = thread.source.activeFile;
+    const seen = active ? `${DateTime.toEpochMillis(active.at)}\n${active.op}\n${active.path}` : "";
+    const trail = previous.get(thread.id);
+    if (trail?.runId === runId && trail.seen === seen) continue;
+    // The file active when a run is first seen was touched before then; the backfill lists it.
+    const paths =
+      trail?.runId !== runId
+        ? []
+        : active?.op === "read" && !trail.paths.includes(active.path)
+          ? [...trail.paths, active.path]
+          : trail.paths;
+    next ??= new Map(previous);
+    next.set(thread.id, { runId, seen, paths });
+  }
+  for (const threadId of previous.keys()) {
+    if (working.has(threadId)) continue;
+    next ??= new Map(previous);
+    next.delete(threadId);
+  }
+  return next ?? previous;
 }
 
 /** The overlap rule, usable without a snapshot: a path changed in two or more working trees. */
@@ -198,7 +294,37 @@ export function deriveCodeMap(input: DeriveCodeMapInput): CodeMap {
   const listed = new Map<string, number>();
   snapshot.files.paths.forEach((path, i) => listed.set(path, snapshot.files.lines[i] ?? 0));
 
-  const { threads, sprites, setsByPath } = collectMarkSets(input);
+  const { threads, actors, setsByPath } = collectMarkSets(input);
+
+  const roots = new Set<string>([...snapshot.checkouts, ...input.checkoutRoots]);
+  for (const thread of input.threads) {
+    if (thread.worktreePath !== null) roots.add(thread.worktreePath);
+  }
+  const sprites: CodeMapSprite[] = [];
+  const readers = new Map<string, ThreadId[]>();
+  for (const { thread, kind, parentThreadId, colorThreadId } of actors) {
+    const active = thread.source.activeFile;
+    sprites.push({
+      threadId: thread.id,
+      kind,
+      parentThreadId,
+      colorThreadId,
+      path: active ? checkoutRelativePath(active.path, roots) : null,
+      op: active?.op ?? null,
+    });
+    const observed = input.observedReads.get(thread.id);
+    const trail = [
+      ...(input.backfilledReads.get(thread.id) ?? []),
+      ...(observed?.runId === thread.source.activeRunId ? observed.paths : []),
+    ];
+    for (const absolute of trail) {
+      const path = checkoutRelativePath(absolute, roots);
+      if (path === null) continue;
+      const threadIds = readers.get(path);
+      if (threadIds === undefined) readers.set(path, [colorThreadId]);
+      else if (!threadIds.includes(colorThreadId)) threadIds.push(colorThreadId);
+    }
+  }
 
   const folderTotals = new Map(snapshot.folders.map((folder) => [folder.path, folder.fileCount]));
   let listedUnder: Map<string, number> | undefined;
@@ -226,5 +352,11 @@ export function deriveCodeMap(input: DeriveCodeMapInput): CodeMap {
     marks.push({ path, lines, isNew: lines === null && !hasHiddenFiles(path), sets });
   }
 
-  return { threads, marks, overlaps: overlapsOf(setsByPath), sprites };
+  return {
+    threads,
+    marks,
+    overlaps: overlapsOf(setsByPath),
+    sprites,
+    reads: [...readers].map(([path, threadIds]) => ({ path, threadIds })),
+  };
 }
