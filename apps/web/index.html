@@ -51,6 +51,20 @@
         // Keep this small boot-time copy in sync with the built-in palettes so
         // the selected theme is visible before the app has mounted.
         const BUILT_IN_THEME_PALETTES = {
+          verdigris: {
+            light: {
+              background: "#e9eedd",
+              foreground: "#10211a",
+              accent: "#1c6a49",
+              chrome: "#e9eedd",
+            },
+            dark: {
+              background: "#10241e",
+              foreground: "#f0f0de",
+              accent: "#83dba6",
+              chrome: "#10241e",
+            },
+          },
           "t3-chat": {
             light: {
               background: "oklch(0.982446 0.010114 325.653)",
@@ -132,6 +146,7 @@
           "system",
           "light",
           "dark",
+          "verdigris",
           "t3-chat",
           "grove",
           "ocean",
@@ -213,7 +228,9 @@
         };
 
         try {
-          const storedTheme = window.localStorage.getItem("t3code:theme");
+          // With nothing stored, the default theme follows the system appearance.
+          const rawStoredTheme = window.localStorage.getItem("t3code:theme");
+          const storedTheme = rawStoredTheme ?? "verdigris";
           const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
           const LEGACY_THEME_IDS = {
             "t3-chat-dark": "t3-chat",
@@ -256,7 +273,7 @@
               ? "system"
               : storedFollowSystem === "false"
                 ? preferenceMode
-                : theme === "system"
+                : theme === "system" || rawStoredTheme === null
                   ? "system"
                   : preferenceMode;
           // A valid mix half for the wanted appearance takes over: it decides
