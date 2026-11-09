@@ -60,6 +60,7 @@ import * as PreviewAgentActivity from "../../preview/PreviewAgentActivity.ts";
 import * as RunExecutionService from "../RunExecutionService.ts";
 import * as RunFinalizationService from "../RunFinalizationService.ts";
 import * as ThreadTitleRegenerationService from "../ThreadTitleRegenerationService.ts";
+import * as DiscussionSummaryService from "../../discussion/DiscussionSummaryService.ts";
 import * as RuntimePolicy from "../RuntimePolicy.ts";
 import * as TurnItemPositionStore from "../TurnItemPositionStore.ts";
 import * as RuntimeRequestService from "../RuntimeRequestService.ts";
@@ -474,6 +475,14 @@ export function layerWithRegistry<Error>(
       }),
     }),
   );
+  const layerDiscussionSummaryTest = Layer.succeed(
+    DiscussionSummaryService.DiscussionSummaryService,
+    DiscussionSummaryService.DiscussionSummaryService.of({
+      execute: Effect.fn("DiscussionSummaryService.execute")(function () {
+        return Effect.void;
+      }),
+    }),
+  );
   const layerOrchestratorProvided = Orchestrator.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -526,6 +535,7 @@ export function layerWithRegistry<Error>(
         layerProviderTurnStartServiceProvided,
         layerRuntimeRequestServiceProvided,
         layerThreadTitleRegenerationTest,
+        layerDiscussionSummaryTest,
         layerServerSettings,
         layerThreadManagementProvided,
       ),
