@@ -56,6 +56,11 @@ export interface CodeMapOverlap {
 
 export interface CodeMapSprite {
   readonly threadId: ThreadId;
+  readonly kind: "agent" | "subagent";
+  /** The root thread for a subagent, null for a top-level thread. */
+  readonly parentThreadId: ThreadId | null;
+  /** The thread whose `threadColor` paints the sprite: the root thread for a subagent. */
+  readonly colorThreadId: ThreadId;
   /** Null means the latest touch named no path inside the root: keep the sprite where it was. */
   readonly path: string | null;
   readonly op: "read" | "edit" | null;
@@ -82,6 +87,7 @@ export type CodeMapThreadInput = Pick<
   | "interactionMode"
   | "latestRun"
   | "runtime"
+  | "lineage"
 > & { readonly source: Pick<OrchestrationV2ThreadShell, "activeFile"> };
 
 export interface DeriveCodeMapInput {
@@ -124,8 +130,27 @@ function collectMarkSets(input: MarkSetsInput) {
   const threads: CodeMapThread[] = [];
   const idsByRoot = new Map<string, ThreadId[]>();
   const sprites: CodeMapSprite[] = [];
+  const liveIds = new Set<ThreadId>();
   for (const thread of input.threads) {
-    if (thread.archivedAt !== null || thread.deletedAt !== null) continue;
+    if (thread.archivedAt === null && thread.deletedAt === null) liveIds.add(thread.id);
+  }
+  for (const thread of input.threads) {
+    if (!liveIds.has(thread.id)) continue;
+    if (thread.lineage.relationshipToParent === "subagent") {
+      const rootId = thread.lineage.rootThreadId;
+      if (isThreadWorking(thread) && liveIds.has(rootId)) {
+        const active = thread.source.activeFile;
+        sprites.push({
+          threadId: thread.id,
+          kind: "subagent",
+          parentThreadId: rootId,
+          colorThreadId: rootId,
+          path: active?.path ?? null,
+          op: active?.op ?? null,
+        });
+      }
+      continue;
+    }
     const root = normalizeRoot(thread.worktreePath ?? projectRoot);
     const running = isThreadWorking(thread);
     if (!running && !changes.get(root)?.length) continue;
@@ -140,7 +165,14 @@ function collectMarkSets(input: MarkSetsInput) {
     else idsByRoot.set(root, [thread.id]);
     if (running) {
       const active = thread.source.activeFile;
-      sprites.push({ threadId: thread.id, path: active?.path ?? null, op: active?.op ?? null });
+      sprites.push({
+        threadId: thread.id,
+        kind: "agent",
+        parentThreadId: null,
+        colorThreadId: thread.id,
+        path: active?.path ?? null,
+        op: active?.op ?? null,
+      });
     }
   }
 

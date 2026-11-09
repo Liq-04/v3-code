@@ -72,6 +72,7 @@ function thread(
     worktreePath: `/wt/${id}`,
     archivedAt: null,
     deletedAt: null,
+    lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: ThreadId.make(id) },
     hasActionableProposedPlan: false,
     hasPendingApprovals: false,
     hasPendingUserInput: false,
