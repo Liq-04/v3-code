@@ -6319,6 +6319,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                       touched.type = 'dynamic_tool'
                       AND json_extract(touched.payload_json, '$.toolName') = ${FILE_READ_TOOL_NAME}
                     )
+                    OR (
+                      touched.type = 'command_execution'
+                      AND json_array_length(touched.payload_json, '$.readPaths') > 0
+                    )
                   )
                   AND (touched.run_id IS NULL OR r.status <> 'rolled_back')
                 ORDER BY touched.ordinal DESC, touched.turn_item_id DESC

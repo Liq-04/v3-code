@@ -9707,13 +9707,79 @@ describe("CodexAdapterV2 post-settle continuation", () => {
             ? [event.turnItem]
             : [],
         );
-        assert.lengthOf(fileChanges, 1);
-        assert.equal(fileChanges[0]?.fileName, "/w/c.ts");
-        assert.deepEqual(fileChanges[0]?.changes, [
+        assert.deepEqual(
+          fileChanges.map((item) => item.status),
+          ["running", "completed"],
+        );
+        assert.lengthOf(new Set(fileChanges.map((item) => item.id)), 1);
+        assert.equal(fileChanges[1]?.fileName, "/w/c.ts");
+        assert.deepEqual(fileChanges[1]?.changes, [
           { operation: "update", path: "/w/d.ts", oldPath: "/w/c.ts" },
           { operation: "delete", path: "/w/e.ts" },
           { operation: "add", path: "/w/a.ts" },
         ]);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
+        ),
+      ),
+    );
+
+    it.effect("reports the absolute paths of read command actions on the command item", () =>
+      Effect.gen(function* () {
+        const command = (
+          phase: "started" | "completed",
+        ): CodexReplay.CodexAppServerReplayEntry => ({
+          type: "emit_inbound",
+          label: `${phase} read`,
+          frame: {
+            method: `item/${phase}`,
+            params: {
+              threadId: nativeThreadId,
+              turnId: nativeTurnId,
+              ...(phase === "started" ? { startedAtMs: 1 } : { completedAtMs: 3 }),
+              item: {
+                type: "commandExecution",
+                id: "read-cmd",
+                command: "sed -n 1,20p src/a.ts && cat /w/b.ts && ls",
+                cwd: "/w",
+                source: "agent",
+                status: phase === "started" ? "inProgress" : "completed",
+                commandActions: [
+                  { type: "read", command: "sed", name: "a.ts", path: "src/a.ts" },
+                  { type: "read", command: "cat", name: "b.ts", path: "/w/b.ts" },
+                  { type: "read", command: "cat", name: "a.ts", path: "/w/src/a.ts" },
+                  { type: "listFiles", command: "ls" },
+                ],
+              },
+            },
+          },
+        });
+        const { harness } = yield* startApprovalTurn("codex-read-actions", [
+          command("started"),
+          command("completed"),
+          turnCompleted(nativeTurnId),
+        ]);
+        yield* harness.firstTerminal;
+
+        const commands = harness.events.flatMap((event) =>
+          event.type === "turn_item.updated" && event.turnItem.type === "command_execution"
+            ? [event.turnItem]
+            : [],
+        );
+        assert.deepEqual(
+          commands.map((item) => item.readPaths),
+          [
+            ["/w/src/a.ts", "/w/b.ts"],
+            ["/w/src/a.ts", "/w/b.ts"],
+          ],
+        );
       }).pipe(
         Effect.scoped,
         Effect.provide(
