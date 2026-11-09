@@ -424,14 +424,19 @@ export const make = Effect.gen(function* () {
     threadId: ThreadId,
   ) {
     yield* legacyImporter.ensureTranscript(threadId);
-    const projection = yield* threadProjections.getThreadRecords(threadId, [
-      "runs",
-      "attempts",
-      "nodes",
-      "runtimeRequests",
-      "subagents",
-      "providerSessions",
-    ]);
+    const projection = yield* threadProjections.getThreadRecords(
+      threadId,
+      [
+        "runs",
+        "attempts",
+        "nodes",
+        "runtimeRequests",
+        "subagents",
+        "providerSessions",
+        "turnItems",
+      ],
+      { turnItemTypes: ["discussion"] },
+    );
     if (projection.thread.deletedAt !== null || projection.thread.projectId !== input.projectId) {
       return;
     }

@@ -6,6 +6,7 @@ import type {
 import type * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 
+import { closeLiveDiscussion } from "./DiscussionDecider.ts";
 import type { PendingOrchestrationEffectV2 } from "./EffectOutbox.ts";
 import type * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 
@@ -18,7 +19,14 @@ export const planThreadDeletion = Effect.fn("ThreadDeletion.planThreadDeletion")
   readonly command: Extract<OrchestrationV2Command, { readonly type: "thread.delete" }>;
   readonly projection: Pick<
     OrchestrationV2ThreadProjection,
-    "thread" | "runs" | "attempts" | "nodes" | "runtimeRequests" | "subagents" | "providerSessions"
+    | "thread"
+    | "runs"
+    | "attempts"
+    | "nodes"
+    | "runtimeRequests"
+    | "subagents"
+    | "providerSessions"
+    | "turnItems"
   >;
   readonly attachmentIds: ReadonlyArray<string>;
   readonly now: DateTime.Utc;
@@ -62,9 +70,26 @@ export const planThreadDeletion = Effect.fn("ThreadDeletion.planThreadDeletion")
       ...projection.thread,
       deletedAt: projection.thread.deletedAt ?? now,
       titleRegeneration: null,
+      discussion: null,
       updatedAt: now,
     },
   });
+  // A live call ends with the thread; nothing is left to summarize into.
+  const closedDiscussion = closeLiveDiscussion({
+    thread: projection.thread,
+    items: projection.turnItems,
+    now,
+  });
+  if (closedDiscussion?.item) {
+    yield* emitEvent({
+      type: "turn-item.updated",
+      threadId: command.threadId,
+      ...(closedDiscussion.item.runId === null ? {} : { runId: closedDiscussion.item.runId }),
+      providerInstanceId: projection.thread.providerInstanceId,
+      occurredAt: now,
+      payload: closedDiscussion.item,
+    });
+  }
 
   const activeRuns = projection.runs.filter((run) =>
     ["preparing", "queued", "starting", "running", "waiting"].includes(run.status),
