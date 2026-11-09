@@ -1,4 +1,5 @@
 import { assert, it } from "@effect/vitest";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -22,8 +23,10 @@ class FakeWebSocket extends EventTarget {
   readonly readyState = 1;
   binaryType = "blob";
   readonly sent: Array<unknown> = [];
-  constructor(readonly url: string) {
+  readonly url: string;
+  constructor(url: string) {
     super();
+    this.url = url;
     FakeWebSocket.created.push(this);
   }
   send(data: unknown) {
@@ -57,7 +60,7 @@ it.effect("opening a voice session connects and sends the key before any line", 
             (url) => new FakeWebSocket(url) as unknown as globalThis.WebSocket,
           ),
         ),
-        Layer.provide(NodeServices.layer),
+        Layer.provide(Layer.merge(NodeServices.layer, NodeCrypto.layer)),
       ),
     ),
   ),

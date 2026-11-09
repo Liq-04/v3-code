@@ -705,7 +705,7 @@ const make = Effect.gen(function* () {
       const call = yield* findCall(discussionId);
       if (call === null) {
         // The upgrade completes only once reading starts; a write before that never goes out.
-        yield* socket.reader;
+        yield* socket.reader.pipe(Effect.ignore);
         yield* writer
           .write(encodeServerFrame({ type: "ended", reason: "ended_by_user" }))
           .pipe(Effect.andThen(writer.write(new Socket.CloseEvent(1000))), Effect.ignore);
