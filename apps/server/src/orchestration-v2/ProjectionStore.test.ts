@@ -1314,8 +1314,8 @@ it.effect("shells name the file the latest tool touched by its absolute path", (
       id: TurnItemId.make("item:active-file:command-read"),
       ordinal: 7,
       type: "command_execution",
-      input: "cat src/e.ts",
-      readPaths: ["/workspace/src/e.ts"],
+      input: "cat src/e.ts src/f.ts",
+      readPaths: ["/workspace/src/e.ts", "/workspace/src/f.ts"],
     });
     yield* expectActiveFile(threadId, { path: "/workspace/src/e.ts", op: "read" });
     yield* updateItem({
@@ -1348,6 +1348,7 @@ it.effect("shells name the file the latest tool touched by its absolute path", (
     assert.deepEqual(yield* store.getRunReadPaths({ threadId, runId: runs[threadId]!.id }), [
       "/workspace/src/a.ts",
       "/workspace/src/e.ts",
+      "/workspace/src/f.ts",
       "/workspace/src/c.ts",
       "/other-checkout/src/a.ts",
     ]);

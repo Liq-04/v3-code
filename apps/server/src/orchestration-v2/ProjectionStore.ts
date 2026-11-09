@@ -91,6 +91,7 @@ import { isAbsolutePath, resolveWorkspaceFilePath } from "@t3tools/shared/path";
 import {
   FILE_READ_TOOL_NAME,
   isFileTouchingTurnItem,
+  turnItemReadPaths,
   turnItemTouchedFile,
 } from "@t3tools/shared/toolActivity";
 import * as Context from "effect/Context";
@@ -1559,12 +1560,17 @@ const linkCardStillAsks = (
 
 const RUN_READ_PATHS_LIMIT = 500;
 
-/** The item's touched path made absolute. A relative path with no root to join stays unknown. */
+/** A relative path with no root to join stays unknown. */
+function absoluteTouchedPath(path: string, root: string | null) {
+  if (root === null) return isAbsolutePath(path) ? path : undefined;
+  return resolveWorkspaceFilePath(path, root);
+}
+
 function touchedFileOf(item: OrchestrationV2TurnItem, root: string | null) {
   const touched = turnItemTouchedFile(item);
   if (touched === undefined) return undefined;
-  if (root === null) return isAbsolutePath(touched.path) ? touched : undefined;
-  return { path: resolveWorkspaceFilePath(touched.path, root), op: touched.op };
+  const path = absoluteTouchedPath(touched.path, root);
+  return path === undefined ? undefined : { path, op: touched.op };
 }
 
 function threadActiveFile(
@@ -7459,10 +7465,12 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       `;
       const paths = new Set<string>();
       for (const row of rows) {
-        const touched = touchedFileOf(yield* decodeTurnItemPayload(row.payload_json), thread.root);
-        if (touched !== undefined) paths.add(touched.path);
+        for (const read of turnItemReadPaths(yield* decodeTurnItemPayload(row.payload_json))) {
+          const path = absoluteTouchedPath(read, thread.root);
+          if (path !== undefined) paths.add(path);
+        }
       }
-      return [...paths];
+      return [...paths].slice(0, RUN_READ_PATHS_LIMIT);
     }, Effect.mapError(shellSnapshotReadError));
 
     const findGuestShareThreadId = Effect.fn("ProjectionStore.findGuestShareThreadId")(function* (

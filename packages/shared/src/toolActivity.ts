@@ -210,16 +210,20 @@ export function isFileTouchingTurnItem(
   );
 }
 
+/** Every file a read tool or a shell command named, in the order it named them. */
+export function turnItemReadPaths(item: OrchestrationV2TurnItem): ReadonlyArray<string> {
+  if (item.type === "command_execution") return item.readPaths ?? [];
+  if (item.type === "dynamic_tool" && item.toolName === FILE_READ_TOOL_NAME) {
+    return collectToolFilePaths(item.input);
+  }
+  return [];
+}
+
 export function turnItemTouchedFile(
   item: OrchestrationV2TurnItem,
 ): { readonly path: string; readonly op: "read" | "edit" } | undefined {
-  if (!isFileTouchingTurnItem(item)) return undefined;
   if (item.type === "file_change") return { path: item.fileName, op: "edit" };
-  if (item.type === "command_execution") {
-    const path = item.readPaths?.[0];
-    return path === undefined ? undefined : { path, op: "read" };
-  }
-  const path = collectToolFilePaths(item.input)[0];
+  const path = turnItemReadPaths(item)[0];
   return path === undefined ? undefined : { path, op: "read" };
 }
 
