@@ -2327,7 +2327,14 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           ? readBranchChangeTotals(repositoryPaths?.worktreeRoot ?? cwd, refName, {
               knownOriginDefaultBranch: defaultBranch,
               untrackedRoots,
-            }).pipe(Effect.orElseSucceed(() => undefined))
+            }).pipe(
+              Effect.map(({ baseRef, insertions, deletions }) => ({
+                baseRef,
+                insertions,
+                deletions,
+              })),
+              Effect.orElseSucceed(() => undefined),
+            )
           : Effect.undefined,
       ],
       { concurrency: "unbounded" },
@@ -5126,7 +5133,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     }),
     readRangeContext,
     readBranchChanges: Effect.fnUntraced(function* (cwd, baseRef) {
-      return yield* readBranchChangeTotals(cwd, null, { baseRef });
+      const { files, filesTotal } = yield* readBranchChangeTotals(cwd, null, { baseRef });
+      return { files, filesTotal };
     }),
     getReviewBranchCommits,
     getReviewDiffPreview,

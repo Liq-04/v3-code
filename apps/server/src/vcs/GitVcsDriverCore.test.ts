@@ -3297,13 +3297,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         for (const baseRef of ["upstream/main", "canonical/team/main", "release/v2"]) {
           yield* git(cwd, ["config", "branch.feature/configured-base.gh-merge-base", baseRef]);
           const status = yield* driver.statusDetailsLocal(cwd, { includeBranchChanges: true });
-          assert.deepStrictEqual(status.branchChanges, {
-            baseRef,
-            insertions: 1,
-            deletions: 0,
-            files: [{ path: "feature.txt", insertions: 1, deletions: 0 }],
-            filesTotal: 1,
-          });
+          assert.deepStrictEqual(status.branchChanges, { baseRef, insertions: 1, deletions: 0 });
           assert.strictEqual(status.aheadCount, 1);
           const preview = yield* driver.getReviewDiffPreview({ cwd });
           const changes = preview.sources.find((source) => source.kind === "branch-range")!;
@@ -3320,11 +3314,6 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
             baseRef: "origin/main",
             insertions: 2,
             deletions: 0,
-            files: [
-              { path: "feature.txt", insertions: 1, deletions: 0 },
-              { path: "upstream.txt", insertions: 1, deletions: 0 },
-            ],
-            filesTotal: 2,
           });
           assert.strictEqual(status.aheadCount, 2);
         }
@@ -3342,11 +3331,6 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
             baseRef: "refs/remotes/upstream/main",
             insertions: 2,
             deletions: 1,
-            files: [
-              { path: "upstream.txt", insertions: 1, deletions: 1 },
-              { path: "feature.txt", insertions: 1, deletions: 0 },
-            ],
-            filesTotal: 2,
           });
           assert.strictEqual(status.aheadCount, 1);
           const preview = yield* driver.getReviewDiffPreview({ cwd });
@@ -3434,8 +3418,6 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           baseRef: null,
           insertions: 1,
           deletions: 0,
-          files: [{ path: "feature.txt", insertions: 1, deletions: 0 }],
-          filesTotal: 1,
         });
       }),
     );
@@ -3462,13 +3444,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           }
           const baseRef = configuredBase ?? "main";
           const status = yield* driver.statusDetailsLocal(cwd, { includeBranchChanges: true });
-          assert.deepStrictEqual(status.branchChanges, {
-            baseRef,
-            insertions: 1,
-            deletions: 0,
-            files: [{ path: "README.md", insertions: 1, deletions: 0 }],
-            filesTotal: 1,
-          });
+          assert.deepStrictEqual(status.branchChanges, { baseRef, insertions: 1, deletions: 0 });
           assert.strictEqual(status.aheadCount, 1);
           const preview = yield* driver.getReviewDiffPreview({ cwd });
           const changes = preview.sources.find((source) => source.kind === "branch-range")!;
@@ -3537,11 +3513,12 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
       }),
     );
 
-    it.effect("branch changes list per-file stats, largest first, capped at 500", () =>
+    it.effect("lists changes since a base per file, largest first, capped at 500", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
         yield* initRepoWithCommit(cwd);
         const driver = yield* GitVcsDriver.GitVcsDriver;
+        const base = (yield* git(cwd, ["branch", "--show-current"])).trim();
         yield* writeTextFile(cwd, "doomed.txt", "a\nb\nc\nd\n");
         yield* git(cwd, ["add", "doomed.txt"]);
         yield* git(cwd, ["commit", "-m", "add doomed"]);
@@ -3550,22 +3527,23 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         yield* writeTextFile(cwd, "untracked.txt", "1\n2\n3\n");
         yield* git(cwd, ["rm", "doomed.txt"]);
 
-        const status = yield* driver.statusDetailsLocal(cwd, { includeBranchChanges: true });
-        assert.deepStrictEqual(status.branchChanges?.files, [
-          { path: "doomed.txt", insertions: 0, deletions: 4 },
-          { path: "untracked.txt", insertions: 3, deletions: 0 },
-          { path: "README.md", insertions: 1, deletions: 0 },
-        ]);
-        assert.strictEqual(status.branchChanges?.filesTotal, 3);
+        assert.deepStrictEqual(yield* driver.readBranchChanges(cwd, base), {
+          files: [
+            { path: "doomed.txt", insertions: 0, deletions: 4 },
+            { path: "untracked.txt", insertions: 3, deletions: 0 },
+            { path: "README.md", insertions: 1, deletions: 0 },
+          ],
+          filesTotal: 3,
+        });
 
         for (let index = 0; index < 501; index++) {
           yield* writeTextFile(cwd, `bulk/${String(index).padStart(3, "0")}.txt`, "x\n");
         }
-        const capped = yield* driver.statusDetailsLocal(cwd, { includeBranchChanges: true });
-        assert.strictEqual(capped.branchChanges?.files?.length, 500);
-        assert.strictEqual(capped.branchChanges?.filesTotal, 504);
+        const capped = yield* driver.readBranchChanges(cwd, base);
+        assert.strictEqual(capped.files.length, 500);
+        assert.strictEqual(capped.filesTotal, 504);
         assert.deepStrictEqual(
-          capped.branchChanges?.files?.slice(0, 2).map((file) => file.path),
+          capped.files.slice(0, 2).map((file) => file.path),
           ["doomed.txt", "untracked.txt"],
         );
       }),
@@ -3594,8 +3572,6 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           baseRef: null,
           insertions: 2,
           deletions: 0,
-          files: [{ path: "new.txt", insertions: 2, deletions: 0 }],
-          filesTotal: 1,
         });
       }),
     );
@@ -3706,14 +3682,6 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           baseRef: initialBranch,
           insertions: Number(insertions),
           deletions: Number(deletions),
-          files: [
-            {
-              path: "repeated.txt",
-              insertions: Number(insertions),
-              deletions: Number(deletions),
-            },
-          ],
-          filesTotal: 1,
         });
 
         const [additions, removals] = minimalStat.split("\t");
@@ -3805,12 +3773,6 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           baseRef: "main",
           insertions: 4,
           deletions: 0,
-          files: [
-            { path: "nested/untracked.txt", insertions: 2, deletions: 0 },
-            { path: "new [1].txt", insertions: 1, deletions: 0 },
-            { path: "README.md", insertions: 1, deletions: 0 },
-          ],
-          filesTotal: 3,
         });
         assert.isUndefined((yield* driver.statusDetailsLocal(cwd)).branchChanges);
       }),
@@ -3843,8 +3805,6 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           baseRef: "upstream/main",
           insertions: 0,
           deletions: 0,
-          files: [],
-          filesTotal: 0,
         });
         const preview = yield* driver.getReviewDiffPreview({ cwd });
         const changes = preview.sources.find((source) => source.kind === "branch-range")!;
@@ -3858,8 +3818,6 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           baseRef: "origin/main",
           insertions: 3,
           deletions: 0,
-          files: [{ path: "canonical.txt", insertions: 3, deletions: 0 }],
-          filesTotal: 1,
         });
       }),
     );
@@ -3909,13 +3867,11 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
             yield* git(cwd, ["config", "status.showUntrackedFiles", mode]);
             untrackedScanRoots.length = 0;
             const status = yield* driver.statusDetailsLocal(cwd, { includeBranchChanges: true });
-            assert.include(status.branchChanges, {
+            assert.deepStrictEqual(status.branchChanges, {
               baseRef: "main",
               insertions: scenario === "long names" ? 2_052 : 2_002,
               deletions: 0,
-              filesTotal: scenario === "long names" ? 1_051 : 1_001,
             });
-            assert.lengthOf(status.branchChanges?.files ?? [], 500);
             assert.deepStrictEqual(untrackedScanRoots, [
               scenario === "normal" ? [":(top,literal)bulk[1]/"] : [],
             ]);

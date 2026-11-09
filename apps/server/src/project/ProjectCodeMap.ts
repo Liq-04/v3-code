@@ -277,10 +277,9 @@ export const make = Effect.gen(function* () {
         args: ["rev-parse", "--show-toplevel"],
       })
       .pipe(Effect.mapError(gitFailed));
-    const { files, filesTotal } = yield* git
+    return yield* git
       .readBranchChanges(checkout.stdout.trim(), base.ref)
       .pipe(Effect.mapError(gitFailed));
-    return { files, filesTotal } satisfies ProjectCodeMapChanges;
   });
 
   return ProjectCodeMap.of({ snapshot, changes });
