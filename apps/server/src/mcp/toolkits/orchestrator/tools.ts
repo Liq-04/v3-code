@@ -1,4 +1,5 @@
 import {
+  DiscussionId,
   OrchestratorMcpCapabilitiesInput,
   OrchestratorMcpCapabilitiesResult,
   OrchestrationV2StopWorkflowInput,
@@ -34,6 +35,7 @@ import {
   OrchestratorMcpThreadSendResult,
   OrchestratorMcpThreadWaitInput,
   OrchestratorMcpThreadWaitResult,
+  ThreadId,
   ThreadMetadataMcpUpdateInput,
   ThreadMetadataMcpUpdateResult,
   TrimmedNonEmptyString,
@@ -42,6 +44,7 @@ import { McpSchema, Tool, Toolkit } from "effect/ai";
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 
+import * as DiscussionService from "../../../discussion/DiscussionService.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as PeerForwarding from "../../../peer/PeerForwarding.ts";
 import * as PeerLinkRequests from "../../../peer/PeerLinkRequests.ts";
@@ -57,6 +60,8 @@ const dependencies = [
 ];
 /** Listing this environment's links. */
 const linkDependencies = [...dependencies, PeerForwarding.PeerForwarding];
+/** Hanging up a thread's voice call. */
+const discussionDependencies = [...dependencies, DiscussionService.DiscussionService];
 /** Making and forgetting links. */
 const linkingDependencies = [
   ...dependencies,
@@ -307,6 +312,23 @@ const ThreadInterruptTool = Tool.make("t3_thread_interrupt", {
   .annotate(Tool.Title, "Interrupt a T3 thread")
   .annotate(Tool.Destructive, true);
 
+const DiscussionEndTool = Tool.make("t3_discussion_end", {
+  description:
+    "Hang up the voice discussion a thread is on (`discussion` in `t3_thread_read`). The agent's running turn continues; a summary of the call lands in the thread. No effect when the thread is not on a call. Starting a call needs a microphone, so only a user can start one.",
+  parameters: Schema.Struct({
+    environmentId: OrchestratorMcpEnvironmentTarget,
+    threadId: ThreadId,
+    discussionId: Schema.optional(DiscussionId),
+  }),
+  success: Schema.Struct({ threadId: ThreadId, status: Schema.Literals(["ended", "not_live"]) }),
+  failure: OrchestratorMcpFailure,
+  failureMode: "return",
+  dependencies: discussionDependencies,
+})
+  .annotate(Tool.Title, "End a voice discussion")
+  .annotate(Tool.Destructive, true)
+  .annotate(Tool.Idempotent, true);
+
 const EnvironmentLinksTool = Tool.make("t3_environment_links", {
   description:
     "List linked environments (the user's other machines) and whether each answers now. Pass one's `environmentId` to a tool to act there; `delegate_task` takes `target.environmentId`. Expired: link it again with `t3_environment_link`.",
@@ -367,6 +389,7 @@ export const OrchestratorToolkit = Toolkit.make(
   ThreadSendTool,
   ThreadWaitTool,
   ThreadInterruptTool,
+  DiscussionEndTool,
   EnvironmentLinksTool,
   EnvironmentLinkTool,
   EnvironmentUnlinkTool,
