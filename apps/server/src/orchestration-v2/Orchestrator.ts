@@ -563,6 +563,9 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.guest-share.close":
     case "thread.guest-message.submit":
     case "thread.guest-message.dismiss":
+    case "thread.discussion.start":
+    case "thread.discussion.end":
+    case "thread.discussion.summary.record":
     case "thread.settle":
     case "thread.auto-settle":
     case "thread.unsettle":

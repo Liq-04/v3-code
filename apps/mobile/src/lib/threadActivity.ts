@@ -564,6 +564,8 @@ function itemIcon(item: OrchestrationV2TurnItem): ThreadFeedActivity["icon"] {
       return "lock";
     case "link_request":
       return "globe";
+    case "discussion":
+      return "message";
   }
 }
 
@@ -625,6 +627,8 @@ function itemSummary(
       return item.label;
     case "link_request":
       return `Link ${item.label ?? item.url ?? "an environment"}`;
+    case "discussion":
+      return "Voice discussion";
     case "dynamic_tool": {
       const classified = classifyToolActivity({
         itemType: "dynamic_tool_call",
@@ -687,6 +691,8 @@ function itemPreview(item: OrchestrationV2TurnItem): string | null {
       return item.reason || null;
     case "subagent":
       return item.result ?? item.progress ?? item.prompt;
+    case "discussion":
+      return item.summary;
     case "dynamic_tool":
       return null;
     case "notification":

@@ -13,6 +13,7 @@ import {
   CheckpointScopeId,
   CommandId,
   ContextHandoffId,
+  DiscussionId,
   ContextTransferId,
   EventId,
   GuestMessageId,
@@ -43,6 +44,7 @@ import {
 } from "./baseSchemas.ts";
 import { AuthMcpClientAccess } from "./auth.ts";
 import { ChatAttachment } from "./chatAttachment.ts";
+import { DiscussionEndReason, DiscussionItemStatus, ThreadDiscussion } from "./discussion.ts";
 import { ThreadGuestShare } from "./guestShare.ts";
 import { StoredThreadTags, ThreadTag } from "./threadTags.ts";
 import {
@@ -486,6 +488,7 @@ export const OrchestrationV2AppThread = Schema.Struct({
   lastSnoozeWakeAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   limitRecovery: Schema.optional(Schema.NullOr(OrchestrationV2LimitRecovery)),
   guestShare: Schema.optional(Schema.NullOr(ThreadGuestShare)),
+  discussion: Schema.optional(Schema.NullOr(ThreadDiscussion)),
   pinnedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
@@ -1610,6 +1613,14 @@ const OrchestrationV2LinkRequestFields = {
   failure: Schema.optional(Schema.String),
 } as const;
 
+/** A voice discussion; `startedAt` and `completedAt` bound the call. */
+const OrchestrationV2DiscussionItemFields = {
+  type: Schema.Literal("discussion"),
+  discussionId: DiscussionId,
+  discussionStatus: DiscussionItemStatus,
+  summary: Schema.NullOr(Schema.String),
+} as const;
+
 export const OrchestrationV2TurnItem = Schema.Union([
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
@@ -1810,6 +1821,10 @@ export const OrchestrationV2TurnItem = Schema.Union([
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
+    ...OrchestrationV2DiscussionItemFields,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2TurnItemBaseFields,
     type: Schema.Literal("subagent"),
     subagentId: NodeId,
     origin: Schema.Literals(["provider_native", "app_owned"]),
@@ -1912,6 +1927,11 @@ export const OrchestrationV2DomainEvent = Schema.Union([
       "thread.provider-switched",
       "thread.guest-share-updated",
     ]),
+    payload: OrchestrationV2AppThread,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2EventBase.fields,
+    type: Schema.Literal("thread.discussion-updated"),
     payload: OrchestrationV2AppThread,
   }),
   Schema.Struct({
@@ -2647,6 +2667,10 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemJsonBaseFields,
+    ...OrchestrationV2DiscussionItemFields,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2TurnItemJsonBaseFields,
     type: Schema.Literal("subagent"),
     subagentId: NodeId,
     origin: Schema.Literals(["provider_native", "app_owned"]),
@@ -2804,6 +2828,11 @@ export const OrchestrationV2DomainEventJson = Schema.Union([
       "thread.provider-switched",
       "thread.guest-share-updated",
     ]),
+    payload: OrchestrationV2AppThreadJson,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2JsonEventBaseFields,
+    type: Schema.Literal("thread.discussion-updated"),
     payload: OrchestrationV2AppThreadJson,
   }),
   Schema.Struct({
@@ -2973,6 +3002,14 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     guestMessageId: GuestMessageId,
+  }),
+  /** Ends a discussion from any device or agent. Idempotent: a call already over is a no-op. */
+  Schema.Struct({
+    type: Schema.Literal("thread.discussion.end"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    discussionId: DiscussionId,
+    reason: DiscussionEndReason,
   }),
   Schema.Struct({
     type: Schema.Literal("thread.unarchive"),
@@ -3428,6 +3465,21 @@ const OrchestrationV2InternalCommand = Schema.Union([
     guestMessageId: GuestMessageId,
     text: Schema.String,
     attachments: Schema.optional(Schema.Array(ChatAttachment)),
+  }),
+  /** Internal so a live marker always has a call holding its audio. */
+  Schema.Struct({
+    type: Schema.Literal("thread.discussion.start"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    discussionId: DiscussionId,
+    heldBy: ThreadDiscussion.fields.heldBy,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.discussion.summary.record"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    discussionId: DiscussionId,
+    summary: Schema.NullOr(Schema.String),
   }),
   /** Moves a thread to a project rooted at the folder it already works in, so its cwd never changes. */
   Schema.Struct({
