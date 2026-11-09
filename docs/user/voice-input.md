@@ -144,16 +144,20 @@ another or the system default.
 ## Talk with the agent
 
 A discussion is a voice call with a thread's own agent. You talk, it answers out
-loud in an ElevenLabs voice, and it keeps working in the thread as usual: reading,
-running commands, and editing under the thread's permissions. Each line you say is
-a real message to the agent, so it costs a turn like a typed one. When the call
-ends, one summary lands in the thread with the transcript behind it.
+loud in an ElevenLabs voice. During the call the agent is asked to read and
+investigate but leave changes for later; it keeps the thread's usual permissions.
+Each line you say is a real message to the agent, so it costs a turn like a typed
+one. When you hang up, the agent gets one more turn to do what you agreed on the
+call, and a summary lands in the thread with the transcript behind it.
+A call that drops, or ends because the thread was archived, gets the summary but no
+follow-up turn.
 
 Before the first call, open **Settings → Voice → Discussions** and add an
 ElevenLabs API key for the environment, or a [secret provider](secrets.md)
 reference. The key stays on that environment, and anyone who can start a discussion
 there uses it. **Voice ID** picks an ElevenLabs voice; leave it blank for the
-default.
+default. **Stability**, **Similarity**, and **Clone strength** tune how the voice
+sounds. Clone strength only affects a professional voice clone.
 
 Start a call with the phone button in the composer, **Start discussion** in the
 command palette, or `mod+alt+shift+d`. A call strip docks above the composer with

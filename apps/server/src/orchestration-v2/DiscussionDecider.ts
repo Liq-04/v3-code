@@ -32,8 +32,11 @@ export interface DiscussionDecision {
   readonly thread: OrchestrationV2AppThread;
   /** The timeline item to write, when it changed. */
   readonly item: DiscussionTurnItem | null;
-  /** The call ended with lines to summarize. */
-  readonly summarize: boolean;
+  /**
+   * The call ended and gets a summary. `act` when the user hung up: the agent then carries out
+   * what the call agreed on.
+   */
+  readonly afterCall: { readonly act: boolean } | null;
 }
 
 export function discussionTurnItemId(discussionId: DiscussionId): TurnItemId {
@@ -80,7 +83,7 @@ function endDiscussion(input: {
           updatedAt: now,
         }
       : null,
-    summarize: endsItem && !lost,
+    afterCall: endsItem && !lost ? { act: reason === "ended_by_user" } : null,
   };
 }
 
@@ -146,7 +149,7 @@ export function decideDiscussionCommand(input: {
           discussionStatus: "live",
           summary: null,
         },
-        summarize: false,
+        afterCall: null,
       });
     }
     case "thread.discussion.end": {
@@ -157,14 +160,14 @@ export function decideDiscussionCommand(input: {
         reason: command.reason,
         now,
       });
-      return Result.succeed(decision ?? { thread, item: null, summarize: false });
+      return Result.succeed(decision ?? { thread, item: null, afterCall: null });
     }
     case "thread.discussion.summary.record": {
       const item = findItem(input.items, command.discussionId);
       if (item === undefined) return Result.fail(DISCUSSION_FAILURE.unknown);
       // A live call has no summary yet, a lost one never gets one, and a recorded one is final.
       if (item.discussionStatus !== "ended" || item.summary !== null || item.status === "failed") {
-        return Result.succeed({ thread, item: null, summarize: false });
+        return Result.succeed({ thread, item: null, afterCall: null });
       }
       return Result.succeed({
         thread,
@@ -175,7 +178,7 @@ export function decideDiscussionCommand(input: {
           status: command.summary === null ? "failed" : item.status,
           updatedAt: now,
         },
-        summarize: false,
+        afterCall: null,
       });
     }
   }

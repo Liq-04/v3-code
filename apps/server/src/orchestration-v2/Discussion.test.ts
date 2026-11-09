@@ -140,7 +140,9 @@ it.effect("starts one call, ends it idempotently and enqueues the summary once",
     yield* end(orchestrator, "end-1");
     assert.isNull((yield* projections.getThread(threadId)).discussion);
     assert.equal((yield* discussionItem)?.discussionStatus, "ended");
-    assert.lengthOf(yield* summaryEffects("end-1"), 1);
+    const ended = yield* summaryEffects("end-1");
+    assert.lengthOf(ended, 1);
+    assert.deepInclude(ended[0]?.request, { act: true });
 
     // End from a second device after the call is over: accepted, nothing changes.
     yield* end(orchestrator, "end-2");
@@ -198,7 +200,10 @@ it.effect("archiving a thread hangs up its call and still summarizes it", () =>
     });
     assert.isNull((yield* projections.getThread(threadId)).discussion);
     assert.equal((yield* discussionItem)?.discussionStatus, "ended");
-    assert.lengthOf(yield* summaryEffects("archive"), 1);
+    const archived = yield* summaryEffects("archive");
+    assert.lengthOf(archived, 1);
+    // Archiving is not the user hanging up, so the agent gets no turn to act.
+    assert.deepInclude(archived[0]?.request, { act: false });
   }).pipe(Effect.provide(layerTest)),
 );
 

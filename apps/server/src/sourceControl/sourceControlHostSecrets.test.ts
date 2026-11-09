@@ -1,5 +1,10 @@
 import { assert, it } from "@effect/vitest";
-import { DeviceHostId, SecretProviderId, UsageLimitSourceId } from "@t3tools/contracts";
+import {
+  DEFAULT_VOICE_SYNTHESIS_SETTINGS,
+  DeviceHostId,
+  SecretProviderId,
+  UsageLimitSourceId,
+} from "@t3tools/contracts";
 import * as SecretResolver from "@t3tools/secret-provider-core/server/SecretResolver";
 import * as Effect from "effect/Effect";
 
@@ -178,7 +183,10 @@ it.effect("reads a collected reference again once it is invalidated", () =>
       Effect.succeed({
         sourceControlHosts: hosts,
         cloudSpeechCredentials: { openai: source("voice#key"), xai: "", openrouter: "" },
-        voiceSynthesis: { elevenlabs: source("elevenlabs#key"), voiceId: "" },
+        voiceSynthesis: {
+          ...DEFAULT_VOICE_SYNTHESIS_SETTINGS,
+          elevenlabs: source("elevenlabs#key"),
+        },
         usageLimitSources,
         easDeviceHosts,
         simlockDeviceHosts,

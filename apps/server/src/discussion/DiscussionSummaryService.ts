@@ -3,6 +3,7 @@ import { discussionTranscript } from "@t3tools/shared/discussion/transcript";
 import {
   CommandId,
   type DiscussionId,
+  MessageId,
   type ServerSettingsError,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -18,9 +19,10 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 
 /**
- * Writes a call's summary once it ended. The transcript is derived from the thread's durable
- * messages, so a replay after a crash summarizes the same lines; the record command's id derives
- * from the effect's, so a replay cannot write twice.
+ * Runs once a call ended: when the user hung up, queues the turn that acts on the call, then writes
+ * its summary. The transcript is derived from the thread's durable messages, so a replay after a
+ * crash sees the same lines; each command's id derives from the effect's, so a replay cannot send
+ * or write twice.
  */
 export class DiscussionSummaryService extends Context.Service<
   DiscussionSummaryService,
@@ -28,6 +30,8 @@ export class DiscussionSummaryService extends Context.Service<
     readonly execute: (input: {
       readonly threadId: ThreadId;
       readonly discussionId: DiscussionId;
+      /** The user hung up, so the agent gets a turn to do what the call agreed on. */
+      readonly act: boolean;
       readonly requestId: CommandId;
     }) => Effect.Effect<
       void,
@@ -37,6 +41,9 @@ export class DiscussionSummaryService extends Context.Service<
     >;
   }
 >()("t3/discussion/DiscussionSummaryService") {}
+
+const HANDOFF_TEXT =
+  "I hung up. Now do what we agreed on the call. If I didn't ask for anything, reply in one sentence.";
 
 const make = Effect.gen(function* () {
   const threads = yield* ThreadManagementService.ThreadManagementService;
@@ -62,6 +69,33 @@ const make = Effect.gen(function* () {
       projection.messages.filter((message) => !message.streaming),
       input.discussionId,
     );
+    if (input.act && transcript.length > 0) {
+      // Queued, so a reply still running from the call finishes first; the new turn resolves its
+      // mode when it starts, after the call's Plan mode has lifted.
+      yield* threads
+        .sendToThread({
+          projectId: projection.thread.projectId,
+          commandId: CommandId.make(`${input.requestId}:discussion-handoff`),
+          threadId: input.threadId,
+          messageId: MessageId.make(`message:discussion:${input.discussionId}:handoff`),
+          text: HANDOFF_TEXT,
+          attachments: [],
+          mode: "queue",
+          createdBy: "user",
+          creationSource: "web",
+        })
+        .pipe(
+          Effect.catchCause((cause) =>
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.interrupt
+              : Effect.logWarning("Discussion handoff was not delivered", {
+                  threadId: input.threadId,
+                  discussionId: input.discussionId,
+                  cause,
+                }),
+          ),
+        );
+    }
     const summary =
       transcript.length === 0
         ? null

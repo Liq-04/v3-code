@@ -104,7 +104,7 @@ interface Row {
   readonly expect?: {
     readonly discussion?: Partial<ThreadDiscussion> | null | undefined;
     readonly item: Partial<DiscussionTurnItem> | null;
-    readonly summarize: boolean;
+    readonly afterCall: { readonly act: boolean } | null;
   };
 }
 
@@ -119,7 +119,7 @@ describe("decideDiscussionCommand", () => {
       expect: {
         discussion: { id: discussionId, startedAt: DateTime.formatIso(later), heldBy: "desktop" },
         item: { runId: RunId.make("run:2"), discussionStatus: "live", summary: null },
-        summarize: false,
+        afterCall: null,
       },
     },
     {
@@ -128,7 +128,7 @@ describe("decideDiscussionCommand", () => {
       runs: [],
       items: [],
       command: start,
-      expect: { discussion: { id: discussionId }, item: { runId: null }, summarize: false },
+      expect: { discussion: { id: discussionId }, item: { runId: null }, afterCall: null },
     },
     {
       name: "start fails while a call is live",
@@ -147,7 +147,7 @@ describe("decideDiscussionCommand", () => {
       failure: DISCUSSION_FAILURE.archived,
     },
     {
-      name: "end clears the marker, settles the item and asks for a summary",
+      name: "the user hanging up clears the marker, settles the item, and asks for a summary and a turn to act",
       thread: live,
       runs: [],
       items: [liveItem],
@@ -155,8 +155,16 @@ describe("decideDiscussionCommand", () => {
       expect: {
         discussion: null,
         item: { discussionStatus: "ended", status: "completed", completedAt: later },
-        summarize: true,
+        afterCall: { act: true },
       },
+    },
+    {
+      name: "a lost client ends the call with a summary but no turn to act",
+      thread: live,
+      runs: [],
+      items: [liveItem],
+      command: end("client_lost"),
+      expect: { discussion: null, item: { discussionStatus: "ended" }, afterCall: { act: false } },
     },
     {
       name: "end after a server restart marks the item lost with no summary",
@@ -164,7 +172,7 @@ describe("decideDiscussionCommand", () => {
       runs: [],
       items: [liveItem],
       command: end("server_restart"),
-      expect: { discussion: null, item: { discussionStatus: "lost" }, summarize: false },
+      expect: { discussion: null, item: { discussionStatus: "lost" }, afterCall: null },
     },
     {
       name: "end of a call that is over changes nothing",
@@ -172,7 +180,7 @@ describe("decideDiscussionCommand", () => {
       runs: [],
       items: [endedItem],
       command: end("ended_by_user"),
-      expect: { discussion: undefined, item: null, summarize: false },
+      expect: { discussion: undefined, item: null, afterCall: null },
     },
     {
       name: "end with another call's id leaves the live call alone",
@@ -180,7 +188,7 @@ describe("decideDiscussionCommand", () => {
       runs: [],
       items: [liveItem],
       command: end("ended_by_user", otherDiscussionId),
-      expect: { discussion: live.discussion, item: null, summarize: false },
+      expect: { discussion: live.discussion, item: null, afterCall: null },
     },
     {
       name: "summary.record fills an ended item once",
@@ -190,7 +198,7 @@ describe("decideDiscussionCommand", () => {
       command: record("They agreed to split the PR."),
       expect: {
         item: { summary: "They agreed to split the PR.", status: "completed" },
-        summarize: false,
+        afterCall: null,
       },
     },
     {
@@ -199,7 +207,7 @@ describe("decideDiscussionCommand", () => {
       runs: [],
       items: [endedItem],
       command: record(null),
-      expect: { item: { summary: null, status: "failed" }, summarize: false },
+      expect: { item: { summary: null, status: "failed" }, afterCall: null },
     },
     {
       name: "summary.record after a failed summary changes nothing",
@@ -207,7 +215,7 @@ describe("decideDiscussionCommand", () => {
       runs: [],
       items: [{ ...endedItem, status: "failed" }],
       command: record("Late."),
-      expect: { item: null, summarize: false },
+      expect: { item: null, afterCall: null },
     },
     {
       name: "summary.record keeps a summary already written",
@@ -215,7 +223,7 @@ describe("decideDiscussionCommand", () => {
       runs: [],
       items: [{ ...endedItem, summary: "First." }],
       command: record("Second."),
-      expect: { item: null, summarize: false },
+      expect: { item: null, afterCall: null },
     },
     {
       name: "summary.record does nothing for a lost call",
@@ -223,7 +231,7 @@ describe("decideDiscussionCommand", () => {
       runs: [],
       items: [{ ...endedItem, discussionStatus: "lost" }],
       command: record("Late."),
-      expect: { item: null, summarize: false },
+      expect: { item: null, afterCall: null },
     },
     {
       name: "summary.record fails for an unknown call",
@@ -259,7 +267,7 @@ describe("decideDiscussionCommand", () => {
     }
     if (expected.item === null) assert.isNull(decided.success.item);
     else assert.deepInclude(decided.success.item ?? {}, expected.item);
-    assert.equal(decided.success.summarize, expected.summarize);
+    assert.deepEqual(decided.success.afterCall, expected.afterCall);
   });
 });
 
@@ -268,7 +276,7 @@ describe("closeLiveDiscussion", () => {
     const closed = closeLiveDiscussion({ thread: live, items: [liveItem], now: later });
     assert.isNull(closed?.thread.discussion);
     assert.equal(closed?.item?.discussionStatus, "ended");
-    assert.isTrue(closed?.summarize);
+    assert.deepEqual(closed?.afterCall, { act: false });
     assert.isNull(closeLiveDiscussion({ thread, items: [endedItem], now: later }));
   });
 });

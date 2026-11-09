@@ -672,12 +672,13 @@ function pendingDiscussionSummaryEffect(
   commandId: CommandId,
   threadId: ThreadId,
   discussionId: DiscussionId,
+  act: boolean,
 ): PendingOrchestrationEffectV2 {
   return {
     id: `effect:${commandId}:discussion-summary.generate`,
     commandId,
     threadId,
-    request: { type: "discussion-summary.generate", discussionId },
+    request: { type: "discussion-summary.generate", discussionId, act },
   };
 }
 
@@ -3320,7 +3321,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     yield* releaseGuestAttachments(command, thread.guestShare, decided.success.guestShare, effects);
   });
 
-  // The call's item, and its summary effect once it ended. The marker is the caller's thread event.
+  // The call's item, and its end-of-call effect once it ended. The marker is the caller's thread event.
   const emitDiscussionItem = Effect.fn("orchestrationV2.dispatch.discussionItem")(function* (
     command: OrchestrationV2ServerCommand & { readonly threadId: ThreadId },
     decision: DiscussionDecision,
@@ -3341,10 +3342,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       occurredAt: now,
       payload: item,
     });
-    if (!decision.summarize) return;
+    if (decision.afterCall === null) return;
+    const { act } = decision.afterCall;
     yield* Ref.update(effects, (existing) => [
       ...existing,
-      pendingDiscussionSummaryEffect(command.commandId, command.threadId, item.discussionId),
+      pendingDiscussionSummaryEffect(command.commandId, command.threadId, item.discussionId, act),
     ]);
   });
 

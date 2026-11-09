@@ -11,6 +11,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 
@@ -73,55 +74,67 @@ function makeHarness(
   };
 }
 
-/** A thread whose call carried one spoken line, then ended. */
-const endedCall = Effect.gen(function* () {
-  const threads = yield* ThreadManagement.ThreadManagementService;
-  yield* threads.dispatch({
-    type: "thread.create",
-    commandId: CommandId.make("create"),
-    threadId,
-    projectId,
-    title: "Seed title",
-    modelSelection,
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    branch: null,
-    worktreePath: null,
-    createdBy: "user",
-    creationSource: "web",
+/** A thread whose call carried one spoken line, or none, then ended. */
+const endedCall = (spoken: boolean) =>
+  Effect.gen(function* () {
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    yield* threads.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create"),
+      threadId,
+      projectId,
+      title: "Seed title",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    });
+    yield* threads.dispatch({
+      type: "thread.discussion.start",
+      commandId: CommandId.make("start"),
+      threadId,
+      discussionId,
+      heldBy: "desktop",
+    });
+    if (spoken)
+      yield* threads.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make("line"),
+        threadId,
+        messageId: MessageId.make("line"),
+        text: "Spoken in a voice discussion: Should we split the PR?",
+        context: {
+          version: 1,
+          records: [],
+          discussion: { discussionId, spoken: "Should we split the PR?" },
+        },
+        attachments: [],
+        dispatchMode: { type: "defer_start" },
+        createdBy: "user",
+        creationSource: "web",
+      });
+    yield* threads.dispatch({
+      type: "thread.discussion.end",
+      commandId: requestId,
+      threadId,
+      discussionId,
+      reason: "ended_by_user",
+    });
+    return threads;
   });
-  yield* threads.dispatch({
-    type: "thread.discussion.start",
-    commandId: CommandId.make("start"),
-    threadId,
-    discussionId,
-    heldBy: "desktop",
-  });
-  yield* threads.dispatch({
-    type: "message.dispatch",
-    commandId: CommandId.make("line"),
-    threadId,
-    messageId: MessageId.make("line"),
-    text: "Spoken in a voice discussion: Should we split the PR?",
-    context: {
-      version: 1,
-      records: [],
-      discussion: { discussionId, spoken: "Should we split the PR?" },
-    },
-    attachments: [],
-    dispatchMode: { type: "defer_start" },
-    createdBy: "user",
-    creationSource: "web",
-  });
-  yield* threads.dispatch({
-    type: "thread.discussion.end",
-    commandId: requestId,
-    threadId,
-    discussionId,
-    reason: "ended_by_user",
-  });
-  return threads;
-});
+
+/** User messages that are not spoken lines: the turn queued to act on the call. */
+const handoffsOf = (threads: ThreadManagement.ThreadManagementService["Service"]) =>
+  threads
+    .getThreadRecords(threadId, ["messages"], { messageRoles: ["user"] })
+    .pipe(
+      Effect.map(({ messages }) =>
+        messages.filter((message) => message.context?.discussion === undefined),
+      ),
+    );
 
 const summaryOf = (threads: ThreadManagement.ThreadManagementService["Service"]) =>
   threads.getThreadRecords(threadId, ["turnItems"], { turnItemTypes: ["discussion"] }).pipe(
@@ -131,25 +144,70 @@ const summaryOf = (threads: ThreadManagement.ThreadManagementService["Service"])
     }),
   );
 
-it.effect("summarizes the derived transcript and records it once across replays", () =>
+const summarizeTranscript: TextGeneration.TextGeneration["Service"]["generateDiscussionSummary"] = (
+  input,
+) =>
+  Effect.succeed({
+    summary: `They discussed: ${input.transcript.map((line) => line.text).join(" ")}`,
+  });
+
+it.effect("queues a turn to act, then summarizes, once across replays", () =>
   Effect.gen(function* () {
-    const harness = makeHarness((input) =>
-      Effect.succeed({
-        summary: `They discussed: ${input.transcript.map((line) => line.text).join(" ")}`,
-      }),
-    );
+    const harness = makeHarness(summarizeTranscript);
     yield* Effect.gen(function* () {
-      const threads = yield* endedCall;
+      const threads = yield* endedCall(true);
       const summary = yield* DiscussionSummaryService.DiscussionSummaryService;
-      yield* summary.execute({ threadId, discussionId, requestId });
+      yield* summary.execute({ threadId, discussionId, act: true, requestId });
       // The effect worker replays after a process loss.
-      yield* summary.execute({ threadId, discussionId, requestId });
+      yield* summary.execute({ threadId, discussionId, act: true, requestId });
+      const handoffs = yield* handoffsOf(threads);
+      assert.lengthOf(handoffs, 1);
+      assert.equal(handoffs[0]?.createdBy, "user");
+      assert.isNotNull(handoffs[0]?.runId);
       assert.equal(yield* summaryOf(threads), "They discussed: Should we split the PR?");
       assert.equal(harness.generate.mock.calls.length, 1);
       const [input] = harness.generate.mock.calls[0]!;
       assert.deepEqual(input.transcript, [{ speaker: "user", text: "Should we split the PR?" }]);
       assert.notEqual(input.cwd, "/repo");
     }).pipe(Effect.provide(harness.layer));
+  }),
+);
+
+it.effect("a replay after a crash between the handoff and the summary sends the handoff once", () =>
+  Effect.gen(function* () {
+    let attempts = 0;
+    const harness = makeHarness((input) =>
+      attempts++ === 0 ? Effect.interrupt : summarizeTranscript(input),
+    );
+    yield* Effect.gen(function* () {
+      const threads = yield* endedCall(true);
+      const summary = yield* DiscussionSummaryService.DiscussionSummaryService;
+      const crashed = yield* Effect.exit(
+        summary.execute({ threadId, discussionId, act: true, requestId }),
+      );
+      assert.isTrue(Exit.isFailure(crashed));
+      yield* summary.execute({ threadId, discussionId, act: true, requestId });
+      assert.lengthOf(yield* handoffsOf(threads), 1);
+      assert.equal(yield* summaryOf(threads), "They discussed: Should we split the PR?");
+    }).pipe(Effect.provide(harness.layer));
+  }),
+);
+
+it.effect("queues no turn when the user did not hang up, or nothing was said", () =>
+  Effect.gen(function* () {
+    yield* Effect.gen(function* () {
+      const threads = yield* endedCall(true);
+      const summary = yield* DiscussionSummaryService.DiscussionSummaryService;
+      yield* summary.execute({ threadId, discussionId, act: false, requestId });
+      assert.lengthOf(yield* handoffsOf(threads), 0);
+    }).pipe(Effect.provide(makeHarness(summarizeTranscript).layer));
+    yield* Effect.gen(function* () {
+      const threads = yield* endedCall(false);
+      const summary = yield* DiscussionSummaryService.DiscussionSummaryService;
+      yield* summary.execute({ threadId, discussionId, act: true, requestId });
+      assert.lengthOf(yield* handoffsOf(threads), 0);
+      assert.isNull(yield* summaryOf(threads));
+    }).pipe(Effect.provide(makeHarness(summarizeTranscript).layer));
   }),
 );
 
@@ -161,9 +219,9 @@ it.effect("records a null summary when generation fails", () =>
       ),
     );
     yield* Effect.gen(function* () {
-      const threads = yield* endedCall;
+      const threads = yield* endedCall(true);
       const summary = yield* DiscussionSummaryService.DiscussionSummaryService;
-      yield* summary.execute({ threadId, discussionId, requestId });
+      yield* summary.execute({ threadId, discussionId, act: false, requestId });
       assert.isNull(yield* summaryOf(threads));
     }).pipe(Effect.provide(harness.layer));
   }),

@@ -553,6 +553,24 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["discussion call elevenlabs voice speaker text to speech tts"],
   },
   {
+    id: "discussion-voice-stability",
+    title: "Discussion voice stability",
+    to: "/settings/voice",
+    searchTerms: ["discussion call elevenlabs voice stability expressive steady harsh soft"],
+  },
+  {
+    id: "discussion-voice-similarity",
+    title: "Discussion voice similarity",
+    to: "/settings/voice",
+    searchTerms: ["discussion call elevenlabs voice similarity boost soft harsh"],
+  },
+  {
+    id: "discussion-voice-clone-strength",
+    title: "Discussion voice clone strength",
+    to: "/settings/voice",
+    searchTerms: ["discussion call elevenlabs voice clone strength professional clone soft harsh"],
+  },
+  {
     id: "discussion-mic-mode",
     title: "Discussion microphone",
     to: "/settings/voice",
