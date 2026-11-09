@@ -50,8 +50,6 @@ export type CodeMapView =
       readonly baseRef: string;
       readonly files: ProjectCodeMapSnapshot["files"];
       readonly model: CodeMap;
-      /** Sorted; the array keeps its identity while the set of marked paths is unchanged. */
-      readonly markedPaths: ReadonlyArray<string>;
     };
 
 const LOADING: CodeMapView = { status: "loading" };
@@ -110,26 +108,17 @@ const codeMapViewFamily = Atom.family((key: string) => {
     const threads = get(environmentThreadShells.threadShellsForProjectRefsAtom([ref]));
     const changesByRoot = readChangesByRoot(get, ref, project.workspaceRoot, threads);
 
-    const previous = Option.getOrNull(get.self<CodeMapView>());
-    const model = deriveCodeMap({
-      snapshot,
-      threads,
-      changesByRoot,
-      projectRoot: project.workspaceRoot,
-    });
-    const markedPaths = model.marks.map((mark) => mark.path).sort();
-    const sameTree = previous?.status === "ready" && previous.treeSha === snapshot.treeSha;
-    const sameMarks =
-      previous?.status === "ready" &&
-      previous.markedPaths.length === markedPaths.length &&
-      previous.markedPaths.every((path, i) => path === markedPaths[i]);
     return {
       status: "ready",
       treeSha: snapshot.treeSha,
       baseRef: snapshot.baseRef,
       files: snapshot.files,
-      model: sameTree ? { ...model, folders: previous.model.folders } : model,
-      markedPaths: sameMarks ? previous.markedPaths : markedPaths,
+      model: deriveCodeMap({
+        snapshot,
+        threads,
+        changesByRoot,
+        projectRoot: project.workspaceRoot,
+      }),
     };
   });
 });

@@ -14,16 +14,6 @@ export interface CodeMapChange {
   readonly deletions: number;
 }
 
-export interface CodeMapFolder {
-  /** Repo-relative; the empty string holds files at the repo root. */
-  readonly path: string;
-  /** Recursive totals from the snapshot, including files that are not listed. */
-  readonly fileCount: number;
-  readonly lines: number;
-  /** Listed files whose direct parent is this folder. */
-  readonly files: ReadonlyArray<{ readonly path: string; readonly lines: number }>;
-}
-
 export interface CodeMapThread {
   readonly threadId: ThreadId;
   /** Worktree path, or the project root when the thread has no worktree. */
@@ -67,7 +57,6 @@ export interface CodeMapSprite {
 }
 
 export interface CodeMap {
-  readonly folders: ReadonlyArray<CodeMapFolder>;
   readonly threads: ReadonlyArray<CodeMapThread>;
   readonly marks: ReadonlyArray<CodeMapPathMark>;
   readonly overlaps: ReadonlyArray<CodeMapOverlap>;
@@ -206,31 +195,8 @@ function overlapsOf(
 
 export function deriveCodeMap(input: DeriveCodeMapInput): CodeMap {
   const { snapshot } = input;
-  const filesByFolder = new Map<string, Array<{ path: string; lines: number }>>();
   const listed = new Map<string, number>();
-  snapshot.files.paths.forEach((path, i) => {
-    const lines = snapshot.files.lines[i] ?? 0;
-    listed.set(path, lines);
-    const parent = parentOf(path);
-    const files = filesByFolder.get(parent);
-    if (files) files.push({ path, lines });
-    else filesByFolder.set(parent, [{ path, lines }]);
-  });
-  const folders: CodeMapFolder[] = snapshot.folders.map((folder) => ({
-    ...folder,
-    files: filesByFolder.get(folder.path) ?? [],
-  }));
-  const rootFiles = filesByFolder.get("");
-  if (rootFiles) {
-    folders.unshift({
-      path: "",
-      fileCount:
-        snapshot.filesTotal -
-        snapshot.folders.reduce((sum, f) => sum + (f.path.includes("/") ? 0 : f.fileCount), 0),
-      lines: rootFiles.reduce((sum, file) => sum + file.lines, 0),
-      files: rootFiles,
-    });
-  }
+  snapshot.files.paths.forEach((path, i) => listed.set(path, snapshot.files.lines[i] ?? 0));
 
   const { threads, sprites, setsByPath } = collectMarkSets(input);
 
@@ -260,5 +226,5 @@ export function deriveCodeMap(input: DeriveCodeMapInput): CodeMap {
     marks.push({ path, lines, isNew: lines === null && !hasHiddenFiles(path), sets });
   }
 
-  return { folders, threads, marks, overlaps: overlapsOf(setsByPath), sprites };
+  return { threads, marks, overlaps: overlapsOf(setsByPath), sprites };
 }

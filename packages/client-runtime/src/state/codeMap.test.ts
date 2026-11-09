@@ -134,23 +134,6 @@ describe("deriveCodeMap", () => {
     ]);
   });
 
-  it("lists every snapshot folder with its listed files, and root files under the empty path", () => {
-    const model = derive([], {});
-    expect(model.folders.find((f) => f.path === "packages/contracts/src")).toMatchObject({
-      fileCount: 2,
-      files: [
-        { path: ORCH, lines: 4000 },
-        { path: "packages/contracts/src/git.ts", lines: 800 },
-      ],
-    });
-    expect(model.folders.find((f) => f.path === "node_modules")?.files).toEqual([]);
-    expect(model.folders[0]).toMatchObject({
-      path: "",
-      fileCount: 1,
-      files: [{ path: "README.md" }],
-    });
-  });
-
   it("reports one overlap with both thread ids when two worktrees change the same file", () => {
     const model = derive(
       [thread("a", { worktree: "/wt/a", running: true }), thread("b", { worktree: "/wt/b" })],
