@@ -1,3 +1,4 @@
+import { discussionLineMessageIds } from "@t3tools/client-runtime/discussion";
 import { useState } from "react";
 import {
   deriveTimelineEntriesFromVisibleTurnItemsWithState,
@@ -17,21 +18,32 @@ function sameInput(left: TimelineEntriesInput, right: TimelineEntriesInput): boo
   );
 }
 
+/** A discussion's lines show inside its item, so the timeline leaves them out. */
+function withoutDiscussionLines(
+  input: TimelineEntriesInput,
+  entries: TimelineEntriesProjection["entries"],
+): TimelineEntriesProjection["entries"] {
+  const folded = discussionLineMessageIds(input.visibleTurnItems);
+  if (folded.size === 0) return entries;
+  return entries.filter((entry) => entry.kind !== "message" || !folded.has(entry.id));
+}
+
 export function useIncrementalTimelineEntries(
   threadKey: string | null,
   input: TimelineEntriesInput,
 ): TimelineEntriesProjection["entries"] {
-  const [state, setState] = useState(() => ({
-    threadKey,
-    projection: deriveTimelineEntriesFromVisibleTurnItemsWithState(input),
-  }));
+  const [state, setState] = useState(() => {
+    const projection = deriveTimelineEntriesFromVisibleTurnItemsWithState(input);
+    return { threadKey, projection, visible: withoutDiscussionLines(input, projection.entries) };
+  });
   if (state.threadKey === threadKey && sameInput(state.projection.input, input)) {
-    return state.projection.entries;
+    return state.visible;
   }
   const projection = deriveTimelineEntriesFromVisibleTurnItemsWithState(
     input,
     state.threadKey === threadKey ? state.projection : null,
   );
-  setState({ threadKey, projection });
-  return projection.entries;
+  const visible = withoutDiscussionLines(input, projection.entries);
+  setState({ threadKey, projection, visible });
+  return visible;
 }

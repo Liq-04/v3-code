@@ -186,6 +186,7 @@ import { shortcutLabelForCommand } from "../keybindings";
 import { cn } from "~/lib/utils";
 import { isModelPickerOpen } from "../modelPickerVisibility";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
+import { toggleDiscussionCall } from "../discussion/activeDiscussion";
 import { toastManager } from "./ui/toast";
 import { projectScriptIdFromCommand } from "~/projectScripts";
 import { newMessageId } from "~/lib/utils";
@@ -2699,6 +2700,11 @@ export default function ChatView(props: ChatViewProps) {
       ...threadLifecycleShortcuts,
       "thread.copyReference": ({ event }) => {
         if (!event.repeat) copyActiveThreadReference();
+      },
+      "composer.discussion": ({ event }) => {
+        if (!isServerThread || activeThreadRef === null || !canOperateThread) return false;
+        if (event.repeat) return;
+        toggleDiscussionCall(activeThreadRef, serverProjection?.thread.discussion?.id ?? null);
       },
       "chat.find": () => {
         if (!isServerThread || serverConfig?.threadFind !== true || activeThreadKey === null)

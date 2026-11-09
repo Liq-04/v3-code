@@ -68,6 +68,8 @@ import {
   LinkIcon,
   MessageSquareIcon,
   PaletteIcon,
+  PhoneIcon,
+  PhoneOffIcon,
   RotateCcwIcon,
   SettingsIcon,
   MonitorIcon,
@@ -139,6 +141,7 @@ import {
   useVisibleThreadShells,
   waitForProject,
 } from "../state/entities";
+import { threadCallAtom, toggleDiscussionCall } from "../discussion/activeDiscussion";
 import { visibleLinkedThreads } from "@t3tools/client-runtime/state/threads";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
@@ -483,6 +486,17 @@ function OpenCommandPaletteDialog(props: {
   );
   const canShareActiveThreadWithGuest = useAtomValue(
     canShareWithGuestAtom(activeThread?.environmentId ?? ("" as EnvironmentId)),
+  );
+  const activeServerThreadRef = activeThread
+    ? scopeThreadRef(activeThread.environmentId, activeThread.id)
+    : null;
+  const activeThreadCall = useAtomValue(
+    threadCallAtom(activeServerThreadRef ? scopedThreadKey(activeServerThreadRef) : ""),
+  );
+  const canStartActiveThreadDiscussion = useAtomValue(
+    serverEnvironment.startDiscussion.permissionAtom(
+      activeThread?.environmentId ?? ("" as EnvironmentId),
+    ),
   );
   const activeThreadReferenceCopyTarget =
     referenceThreadRef === null || (pathname === "/pull-requests" && !openPanelPullRequestUrl)
@@ -1444,6 +1458,29 @@ function OpenCommandPaletteDialog(props: {
         openGuestShareDialog(threadRef);
       },
     });
+  }
+
+  if (activeServerThreadRef !== null) {
+    const threadRef = activeServerThreadRef;
+    const { discussionId, heldHere } = activeThreadCall;
+    const onCall = discussionId !== null || heldHere;
+    if (onCall || canStartActiveThreadDiscussion) {
+      actionItems.push({
+        kind: "action",
+        value: onCall ? "action:end-discussion" : "action:start-discussion",
+        searchTerms: ["discussion", "voice", "call", "talk", "speak", onCall ? "hang up" : "start"],
+        title: onCall ? "End discussion" : "Start discussion",
+        icon: onCall ? (
+          <PhoneOffIcon className={ITEM_ICON_CLASS} />
+        ) : (
+          <PhoneIcon className={ITEM_ICON_CLASS} />
+        ),
+        shortcutCommand: "composer.discussion",
+        run: async () => {
+          toggleDiscussionCall(threadRef, discussionId);
+        },
+      });
+    }
   }
 
   if (activeThread !== null) {
