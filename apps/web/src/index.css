@@ -656,22 +656,16 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   }
 }
 
-@utility code-map-cell {
-  background: color-mix(in srgb, var(--foreground) 6%, var(--card));
-}
-
-@utility code-map-sprite {
-  transition:
-    transform 0.6s cubic-bezier(0.35, 0.8, 0.25, 1),
-    opacity 0.2s;
+@utility code-map-walk {
+  animation: code-map-step 0.26s ease-in-out infinite alternate;
 
   @media (prefers-reduced-motion: reduce) {
-    transition: none;
+    animation: none;
   }
 }
 
-@utility code-map-hop {
-  animation: code-map-hop 0.6s ease-out;
+@utility code-map-land {
+  animation: code-map-land 0.35s ease-out;
 
   @media (prefers-reduced-motion: reduce) {
     animation: none;
@@ -679,30 +673,33 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 }
 
 @utility code-map-say {
-  animation: code-map-say 1.5s linear forwards;
+  animation: code-map-say 1.6s linear forwards;
 }
 
-@keyframes code-map-hop {
+@keyframes code-map-step {
+  from {
+    transform: translateY(0) rotate(-4deg);
+  }
+  to {
+    transform: translateY(-3px) rotate(4deg);
+  }
+}
+
+@keyframes code-map-land {
   0% {
-    transform: translateY(0) scale(1, 1);
+    transform: scale(1.15, 0.8);
   }
-  14% {
-    transform: translateY(0) scale(1.12, 0.82);
-  }
-  50% {
-    transform: translateY(-12px) scale(0.94, 1.1);
-  }
-  86% {
-    transform: translateY(0) scale(1.14, 0.84);
+  60% {
+    transform: scale(0.95, 1.06);
   }
   100% {
-    transform: translateY(0) scale(1, 1);
+    transform: none;
   }
 }
 
 @keyframes code-map-say {
   0%,
-  85% {
+  70% {
     opacity: 1;
   }
   100% {
