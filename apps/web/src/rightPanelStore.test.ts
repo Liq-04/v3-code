@@ -447,6 +447,14 @@ describe("rightPanelStore", () => {
     expect(store.openProactive(refC, completedDiff, store.getUserActionRevision(refC))).toBe(false);
     expect(active(refC)).toBe("map");
 
+    // A thread that got the map first, then tabs of its own, and shows the map again.
+    const refD = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-D"));
+    store.revealPinnedMap(refD);
+    store.open(refD, "diff");
+    store.open(refD, "files");
+    store.revealPinnedMap(refD);
+    expect(active(refD)).toBe("map");
+
     await reloadRightPanelStore();
     expect(useRightPanelStore.getState().mapPinned).toBe(true);
 
@@ -455,8 +463,11 @@ describe("rightPanelStore", () => {
     expect(useRightPanelStore.getState().mapPinned).toBe(false);
     expect(active(refB)).toBe("diff");
     expect(panel(refA)).toEqual({ isOpen: false, activeSurfaceId: null, surfaces: [] });
+    // A panel that showed the map collapses only when the map was its last tab.
     expect(panel(refC).surfaces.map((surface) => surface.kind)).not.toContain("map");
     expect(panel(refC).isOpen).toBe(false);
+    expect(panel(refD).surfaces.map((surface) => surface.kind)).toEqual(["diff", "files"]);
+    expect(active(refD)).toBe("files");
     store.revealPinnedMap(refA);
     expect(active(refA)).toBeNull();
     // The other threads lost a tab the operator never closed there, so none is offered back.

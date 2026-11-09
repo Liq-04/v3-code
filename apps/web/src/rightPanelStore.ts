@@ -388,7 +388,8 @@ function mapPinnedAfter(
   return closedMapTab || collapsedOnMap ? false : pinned;
 }
 
-// A thread still showing the map only had its panel open for the pin, so it collapses too.
+// A thread whose active tab was the map falls back to its last remaining tab: the store does
+// not record which tab was used most recently. A panel left with no tab collapses.
 function removeMapFromOtherThreads(
   data: RightPanelStoreData,
   exceptThreadKey: string,
@@ -398,7 +399,9 @@ function removeMapFromOtherThreads(
     if (threadKey === exceptThreadKey || !hasMap(thread)) continue;
     next = updateThread(next, threadKey, (current) => {
       const stripped = withoutSurface(current, MAP_SURFACE_ID);
-      return showsMap(current) ? { ...stripped, isOpen: false } : stripped;
+      return current.activeSurfaceId === MAP_SURFACE_ID
+        ? { ...stripped, activeSurfaceId: stripped.surfaces.at(-1)?.id ?? null }
+        : stripped;
     });
   }
   return next;
