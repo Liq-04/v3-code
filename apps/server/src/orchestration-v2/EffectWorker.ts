@@ -563,6 +563,7 @@ export const layerExecutor: Layer.Layer<
               .execute({
                 threadId: effect.threadId,
                 discussionId: effect.request.discussionId,
+                act: effect.request.act === true,
                 requestId: effect.commandId,
               })
               .pipe(
