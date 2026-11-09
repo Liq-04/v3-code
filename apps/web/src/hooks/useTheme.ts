@@ -40,8 +40,9 @@ type DesktopThemeBridge = Pick<DesktopBridge, "setTheme">;
 
 const STORAGE_KEY = "t3code:theme";
 const MEDIA_QUERY = "(prefers-color-scheme: dark)";
+const DEFAULT_THEME = "verdigris";
 const DEFAULT_THEME_SNAPSHOT: ThemeSnapshot = {
-  theme: "system",
+  theme: DEFAULT_THEME,
   resolvedTheme: "light",
   systemDark: false,
   followSystem: true,
@@ -143,8 +144,10 @@ function getSystemDark() {
   );
 }
 
+// setTheme always stores the appearance mode, so the default theme only reaches this unset.
 function readStoredFollowSystem(theme: Theme): boolean {
-  if (typeof window === "undefined") return theme === "system";
+  const fallback = theme === "system" || theme === DEFAULT_THEME;
+  if (typeof window === "undefined") return fallback;
 
   try {
     const raw = window.localStorage.getItem(THEME_FOLLOW_SYSTEM_STORAGE_KEY);
@@ -152,7 +155,7 @@ function readStoredFollowSystem(theme: Theme): boolean {
     if (raw === "false") return false;
   } catch {}
 
-  return theme === "system";
+  return fallback;
 }
 
 function isThemePreferenceMode(value: string | null): value is ThemePreferenceMode {
