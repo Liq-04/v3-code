@@ -25,7 +25,7 @@ import {
   resumesCutReply,
 } from "@t3tools/shared/discussion/callPhase";
 import {
-  emptySpeechBeats,
+  startSpeechBeats,
   type SpeechBeats,
   stepSpeechBeats,
 } from "@t3tools/shared/discussion/speechBeats";
@@ -306,6 +306,7 @@ const make = Effect.gen(function* () {
     const stepped = stepSpeechBeats(call.beats, {
       type: "text",
       messageId: frame.messageId,
+      runId: frame.runId,
       text: frame.text,
       complete: frame.complete,
       at,
@@ -633,7 +634,9 @@ const make = Effect.gen(function* () {
             .map((request) => request.id),
         ),
         lastPhase: null,
-        beats: emptySpeechBeats,
+        beats: startSpeechBeats(
+          projection.runs.filter((run) => ACTIVE_RUN_STATUSES.has(run.status)).map((run) => run.id),
+        ),
         pendingBeats: [],
         cut: false,
         status: startStatusTimer(now),
