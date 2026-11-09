@@ -6,7 +6,11 @@ each line the user finishes on the call's media socket (`/ws/discussion`) is sen
 to the thread's agent by the server as its own turn, with the spoken text kept
 as `context.discussion` on the message. The server sets that attribution, and
 client sends that claim it are stripped, so the call's transcript can be derived
-from the thread's messages. Audio is temporary client input either way. Mobile
+from the thread's messages. The call keeps the thread's runtime mode; only the
+call prompt asks the agent not to change anything until the user hangs up, when the
+end-of-call effect queues one more turn to do what the call agreed on. Switching to
+Plan mode instead would replace Claude's process on every call and route its reads
+through approvals. Audio is temporary client input either way. Mobile
 defaults to on-device transcription. Sending audio off the device requires an
 explicit grant naming one environment and, for cloud transcription, one
 provider; a discussion also sends the agent's text to the voice synthesizer
