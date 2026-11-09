@@ -1,12 +1,14 @@
 import {
   AuthSettingsWriteScope,
   DEFAULT_DISCUSSION_END_OF_SPEECH_MS,
+  DEFAULT_VOICE_SYNTHESIS_SETTINGS,
   type DiscussionMicMode,
   type EnvironmentId,
   isSecretReference,
   type SecretReference,
+  type VoiceSynthesisSettings,
 } from "@t3tools/contracts";
-import type { CSSProperties } from "react";
+import { type CSSProperties, useState } from "react";
 
 import {
   updateClientSettings,
@@ -19,7 +21,7 @@ import { Button } from "../ui/button";
 import { DraftInput } from "../ui/draft-input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
-import { searchableSetting } from "./settingsSearch";
+import { searchableSetting, type SettingsSearchItemId } from "./settingsSearch";
 import { useOptionalSettingsScope } from "./SettingsScopeContext";
 import { SecretSourceInput, useSecretSources } from "./SecretSourceInput";
 
@@ -90,6 +92,115 @@ function VoiceIdControl({ environmentId }: { readonly environmentId: Environment
   );
 }
 
+type VoiceSliderField = "stability" | "similarity" | "cloneStrength";
+
+const VOICE_SLIDERS = [
+  {
+    field: "stability",
+    searchId: "discussion-voice-stability",
+    title: "Stability",
+    description: "Lower sounds more expressive; higher sounds steadier.",
+  },
+  {
+    field: "similarity",
+    searchId: "discussion-voice-similarity",
+    title: "Similarity",
+    description: "How closely the voice keeps to the original voice.",
+  },
+  {
+    field: "cloneStrength",
+    searchId: "discussion-voice-clone-strength",
+    title: "Clone strength",
+    description:
+      "For a professional voice clone, how closely it matches the clone's samples. Other voices ignore it.",
+  },
+] as const satisfies ReadonlyArray<{
+  field: VoiceSliderField;
+  searchId: SettingsSearchItemId;
+  title: string;
+  description: string;
+}>;
+
+/** Environment settings: drag locally and save once on release, not an RPC per step. */
+function VoiceSliderRow({
+  environmentId,
+  slider,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly slider: (typeof VOICE_SLIDERS)[number];
+}) {
+  const { field, searchId, title, description } = slider;
+  const saved = useEnvironmentSettings(
+    environmentId,
+    (settings): VoiceSynthesisSettings[VoiceSliderField] => settings.voiceSynthesis[field],
+  );
+  const updateSettings = useUpdateEnvironmentSettings(environmentId);
+  const canManage = useEnvironmentScope(environmentId, AuthSettingsWriteScope);
+  // A draft belongs to the saved value it was dragged from, so it lapses once a save lands.
+  const [draft, setDraft] = useState<{ readonly base: number; readonly value: number } | null>(
+    null,
+  );
+  const value = draft !== null && draft.base === saved ? draft.value : saved;
+  const defaultValue = DEFAULT_VOICE_SYNTHESIS_SETTINGS[field];
+  const save = (next: number) => {
+    if (next !== saved)
+      updateSettings({ voiceSynthesis: { [field]: next } }, { onFailed: () => setDraft(null) });
+  };
+  const commit = () => save(value);
+  const inputId = `discussion-${field}`;
+  return (
+    <SettingsRow
+      {...searchableSetting(searchId)}
+      title={title}
+      description={description}
+      resetAction={
+        value !== defaultValue && canManage ? (
+          <SettingResetButton
+            label={title.toLowerCase()}
+            onClick={() => {
+              setDraft(null);
+              save(defaultValue);
+            }}
+          />
+        ) : null
+      }
+      control={
+        <div className="flex w-full items-center gap-3 sm:w-52">
+          <output
+            className="min-w-16 rounded-md bg-muted px-2 py-1 text-center font-mono text-xs font-medium tabular-nums text-foreground"
+            htmlFor={inputId}
+          >
+            {value}%
+          </output>
+          <input
+            aria-label={title}
+            className="settings-slider min-w-0 flex-1"
+            id={inputId}
+            min={0}
+            max={100}
+            step={1}
+            disabled={!canManage}
+            style={
+              {
+                "--settings-slider-progress": `${value}%`,
+                "--settings-slider-fill-offset": `${0.5 - value / 100}rem`,
+              } as CSSProperties
+            }
+            type="range"
+            value={value}
+            onChange={(event) =>
+              setDraft({ base: saved, value: Number(event.currentTarget.value) })
+            }
+            onPointerUp={commit}
+            onKeyUp={commit}
+            onBlur={commit}
+          />
+        </div>
+      }
+    />
+  );
+}
+
 /** Settings → Voice → Discussions: the voice the agent answers in, and how the mic takes turns. */
 export function DiscussionSettings() {
   const micMode = useClientSettings((settings) => settings.discussionMicMode);
@@ -124,6 +235,15 @@ export function DiscussionSettings() {
           control={<VoiceIdControl environmentId={environment.environmentId} />}
         />
       ) : null}
+      {environment
+        ? VOICE_SLIDERS.map((slider) => (
+            <VoiceSliderRow
+              key={slider.field}
+              environmentId={environment.environmentId}
+              slider={slider}
+            />
+          ))
+        : null}
       <SettingsRow
         {...searchableSetting("discussion-mic-mode")}
         title="Microphone"

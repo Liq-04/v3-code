@@ -1,3 +1,4 @@
+import type { VoiceSynthesisSettings } from "@t3tools/contracts";
 import * as SecretResolver from "@t3tools/secret-provider-core/server/SecretResolver";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -21,8 +22,6 @@ import * as ServerSettings from "../serverSettings.ts";
 const ELEVENLABS_MODEL_ID = "eleven_v4_turbo";
 const ELEVENLABS_DEFAULT_VOICE_ID = "EST9Ui6982FZPSi7gCHi";
 const ELEVENLABS_OUTPUT_FORMAT = "pcm_24000";
-/** Below the 0.5 default, so the voice is livelier. */
-const ELEVENLABS_STABILITY = 0.4;
 
 export class SynthError extends Schema.TaggedError<SynthError>()("SynthError", {
   reason: Schema.Literals(["not_configured", "connect", "provider"]),
@@ -63,6 +62,7 @@ function elevenLabsSpeechRequest(input: {
   readonly apiKey: string;
   readonly text: string;
   readonly previous: string | null;
+  readonly voice: Pick<VoiceSynthesisSettings, "stability" | "similarity" | "cloneStrength">;
 }): HttpClientRequest.HttpClientRequest {
   return HttpClientRequest.post(
     `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(input.voiceId)}/stream?output_format=${ELEVENLABS_OUTPUT_FORMAT}`,
@@ -71,7 +71,11 @@ function elevenLabsSpeechRequest(input: {
     HttpClientRequest.bodyJsonUnsafe({
       text: input.text,
       model_id: ELEVENLABS_MODEL_ID,
-      voice_settings: { stability: ELEVENLABS_STABILITY },
+      voice_settings: {
+        stability: input.voice.stability / 100,
+        similarity_boost: input.voice.similarity / 100,
+        clone_strength: input.voice.cloneStrength / 100,
+      },
       ...(input.previous === null ? {} : { previous_text: input.previous }),
     }),
   );
@@ -117,7 +121,7 @@ export const layerElevenLabs: Layer.Layer<
           previous: string | null,
         ) {
           const response = yield* httpClient
-            .execute(elevenLabsSpeechRequest({ voiceId, apiKey, text, previous }))
+            .execute(elevenLabsSpeechRequest({ voiceId, apiKey, text, previous, voice }))
             .pipe(Effect.mapError((cause) => new SynthError({ reason: "connect", cause })));
           if (response.status < 200 || response.status >= 300) {
             return yield* new SynthError({
