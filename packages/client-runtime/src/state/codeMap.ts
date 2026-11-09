@@ -115,38 +115,12 @@ function parentOf(path: string): string {
   return slash === -1 ? "" : path.slice(0, slash);
 }
 
-export function deriveCodeMap(input: DeriveCodeMapInput): CodeMap {
-  const { snapshot } = input;
+type MarkSetsInput = Pick<DeriveCodeMapInput, "threads" | "changesByRoot" | "projectRoot">;
+
+function collectMarkSets(input: MarkSetsInput) {
   const projectRoot = normalizeRoot(input.projectRoot);
   const changes = new Map<string, ReadonlyArray<CodeMapChange>>();
   for (const [root, files] of input.changesByRoot) changes.set(normalizeRoot(root), files);
-
-  const filesByFolder = new Map<string, Array<{ path: string; lines: number }>>();
-  const listed = new Map<string, number>();
-  snapshot.files.paths.forEach((path, i) => {
-    const lines = snapshot.files.lines[i] ?? 0;
-    listed.set(path, lines);
-    const parent = parentOf(path);
-    const files = filesByFolder.get(parent);
-    if (files) files.push({ path, lines });
-    else filesByFolder.set(parent, [{ path, lines }]);
-  });
-  const folders: CodeMapFolder[] = snapshot.folders.map((folder) => ({
-    ...folder,
-    files: filesByFolder.get(folder.path) ?? [],
-  }));
-  const rootFiles = filesByFolder.get("");
-  if (rootFiles) {
-    folders.unshift({
-      path: "",
-      fileCount:
-        snapshot.filesTotal -
-        snapshot.folders.reduce((sum, f) => sum + (f.path.includes("/") ? 0 : f.fileCount), 0),
-      lines: rootFiles.reduce((sum, file) => sum + file.lines, 0),
-      files: rootFiles,
-    });
-  }
-
   const threads: CodeMapThread[] = [];
   const idsByRoot = new Map<string, ThreadId[]>();
   const sprites: CodeMapSprite[] = [];
@@ -180,6 +154,54 @@ export function deriveCodeMap(input: DeriveCodeMapInput): CodeMap {
     }
   }
 
+  return { threads, sprites, setsByPath };
+}
+
+/** The overlap rule, usable without a snapshot: a path changed in two or more working trees. */
+export function deriveCodeMapOverlaps(input: MarkSetsInput): ReadonlyArray<CodeMapOverlap> {
+  return overlapsOf(collectMarkSets(input).setsByPath);
+}
+
+function overlapsOf(
+  setsByPath: ReadonlyMap<string, ReadonlyArray<CodeMapMarkSet>>,
+): CodeMapOverlap[] {
+  const overlaps: CodeMapOverlap[] = [];
+  for (const [path, sets] of setsByPath) {
+    if (sets.length > 1) overlaps.push({ path, threadIds: sets.flatMap((set) => set.threadIds) });
+  }
+  return overlaps;
+}
+
+export function deriveCodeMap(input: DeriveCodeMapInput): CodeMap {
+  const { snapshot } = input;
+  const filesByFolder = new Map<string, Array<{ path: string; lines: number }>>();
+  const listed = new Map<string, number>();
+  snapshot.files.paths.forEach((path, i) => {
+    const lines = snapshot.files.lines[i] ?? 0;
+    listed.set(path, lines);
+    const parent = parentOf(path);
+    const files = filesByFolder.get(parent);
+    if (files) files.push({ path, lines });
+    else filesByFolder.set(parent, [{ path, lines }]);
+  });
+  const folders: CodeMapFolder[] = snapshot.folders.map((folder) => ({
+    ...folder,
+    files: filesByFolder.get(folder.path) ?? [],
+  }));
+  const rootFiles = filesByFolder.get("");
+  if (rootFiles) {
+    folders.unshift({
+      path: "",
+      fileCount:
+        snapshot.filesTotal -
+        snapshot.folders.reduce((sum, f) => sum + (f.path.includes("/") ? 0 : f.fileCount), 0),
+      lines: rootFiles.reduce((sum, file) => sum + file.lines, 0),
+      files: rootFiles,
+    });
+  }
+
+  const { threads, sprites, setsByPath } = collectMarkSets(input);
+
   const folderTotals = new Map(snapshot.folders.map((folder) => [folder.path, folder.fileCount]));
   let listedUnder: Map<string, number> | undefined;
   const hasHiddenFiles = (path: string): boolean => {
@@ -201,12 +223,10 @@ export function deriveCodeMap(input: DeriveCodeMapInput): CodeMap {
   };
 
   const marks: CodeMapPathMark[] = [];
-  const overlaps: CodeMapOverlap[] = [];
   for (const [path, sets] of setsByPath) {
     const lines = listed.get(path) ?? null;
     marks.push({ path, lines, isNew: lines === null && !hasHiddenFiles(path), sets });
-    if (sets.length > 1) overlaps.push({ path, threadIds: sets.flatMap((set) => set.threadIds) });
   }
 
-  return { folders, threads, marks, overlaps, sprites };
+  return { folders, threads, marks, overlaps: overlapsOf(setsByPath), sprites };
 }

@@ -1,8 +1,14 @@
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { Atom } from "effect/reactivity";
 import { expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
 
 const persisted = vi.hoisted(() => ({ title: "" }));
+const overlapState = vi.hoisted(() => ({ atom: null as Atom.Atom<ReadonlyArray<unknown>> | null }));
+vi.mock("~/state/codeMap", () => ({
+  threadOverlapsAtom: () => (overlapState.atom ??= Atom.make([])),
+}));
 vi.mock(import("../../state/session"), async (importOriginal) => ({
   ...(await importOriginal()),
   useEnvironmentScope: () => true,
@@ -20,7 +26,11 @@ vi.mock(import("~/hooks/useThreadActionMenu"), () => ({
   useThreadActionMenu: () => ({ openMenu: () => {}, closeMenu: () => {} }),
 }));
 
+import { RegistryContext } from "@effect/atom-react";
+import { AtomRegistry } from "effect/reactivity";
 import { render } from "../../../test/render";
+import { selectActiveRightPanelSurface, useRightPanelStore } from "~/rightPanelStore";
+import { useCodeMapFocusStore } from "../map/codeMapFocusStore";
 import { ChatHeader } from "./ChatHeader";
 
 function header(title: string) {
@@ -71,3 +81,61 @@ it.each(["blur", "Enter"] as const)(
     expect(persisted.title).toBe("My edited title");
   },
 );
+
+const threadRef = scopeThreadRef(EnvironmentId.make("environment"), ThreadId.make("thread"));
+
+function overlapsHeader(overlaps: ReadonlyArray<{ path: string; otherTitles: string[] }>) {
+  useRightPanelStore.setState({ byThreadKey: {} });
+  useCodeMapFocusStore.setState({ selected: null });
+  overlapState.atom = Atom.make(overlaps);
+  const registry = AtomRegistry.make();
+  return {
+    ui: <RegistryContext.Provider value={registry}>{header("Thread")}</RegistryContext.Provider>,
+    [Symbol.dispose]: () => registry.dispose(),
+  };
+}
+
+it("hides the shared-files pill when no file is shared", async () => {
+  using context = overlapsHeader([]);
+  await using screen = await render(context.ui);
+  await expect.element(screen.getByText(/Shares \d+ file/)).not.toBeInTheDocument();
+});
+
+it.each([
+  {
+    label: "Shares 1 file",
+    overlaps: [{ path: "src/a.ts", otherTitles: ["Other thread"] }],
+  },
+  {
+    label: "Shares 2 files",
+    overlaps: [
+      { path: "src/a.ts", otherTitles: ["Other thread"] },
+      { path: "src/b.ts", otherTitles: ["Other thread", "Third"] },
+    ],
+  },
+])("shows $label and opens the Map tab on the first shared file", async ({ label, overlaps }) => {
+  using context = overlapsHeader(overlaps);
+  await using screen = await render(context.ui);
+  await screen.getByRole("button", { name: label }).click();
+  expect(
+    selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, threadRef),
+  ).toMatchObject({
+    kind: "map",
+  });
+  expect(useCodeMapFocusStore.getState().selected).toEqual({
+    threadKey: "environment:thread",
+    path: "src/a.ts",
+  });
+});
+
+it("opens the Map tab from the pill with Enter", async () => {
+  using context = overlapsHeader([{ path: "src/a.ts", otherTitles: ["Other thread"] }]);
+  await using screen = await render(context.ui);
+  screen.getByRole("button", { name: "Shares 1 file" }).element().focus();
+  await userEvent.keyboard("{Enter}");
+  expect(
+    selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, threadRef),
+  ).toMatchObject({
+    kind: "map",
+  });
+});
