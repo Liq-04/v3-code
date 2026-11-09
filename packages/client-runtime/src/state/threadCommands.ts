@@ -21,6 +21,7 @@ import {
   type InterruptThreadTurnInput,
   archiveThread,
   closeGuestShare,
+  endDiscussion,
   resolveGuestMessage,
   cancelQueuedRun,
   createThread,
@@ -134,6 +135,12 @@ export function createThreadEnvironmentAtoms<R, E>(
     closeGuestShare: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:close-guest-share",
       execute: closeGuestShare,
+      scheduler,
+      concurrency,
+    }),
+    endDiscussion: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:end-discussion",
+      execute: endDiscussion,
       scheduler,
       concurrency,
     }),

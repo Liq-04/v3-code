@@ -27,6 +27,8 @@ import {
   type ThreadEnvMode,
   type UploadChatAttachment,
   type GuestMessageId,
+  type DiscussionEndReason,
+  type DiscussionId,
 } from "@t3tools/contracts";
 import { derivePendingBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
@@ -445,6 +447,23 @@ export const closeGuestShare = Effect.fn("EnvironmentCommands.closeGuestShare")(
   input: CloseGuestShareInput,
 ) {
   return yield* simpleThreadCommand("thread.guest-share.close", input);
+});
+
+export interface EndDiscussionInput extends ThreadCommandInput {
+  readonly discussionId: DiscussionId;
+  readonly reason?: DiscussionEndReason;
+}
+/** Hangs up from any device; ending a call that is already over does nothing. */
+export const endDiscussion = Effect.fn("EnvironmentCommands.endDiscussion")(function* (
+  input: EndDiscussionInput,
+) {
+  return yield* dispatch({
+    type: "thread.discussion.end",
+    commandId: yield* allocateCommandId(input),
+    threadId: input.threadId,
+    discussionId: input.discussionId,
+    reason: input.reason ?? "ended_by_user",
+  });
 });
 
 export interface ResolveGuestMessageInput extends ThreadCommandInput {
