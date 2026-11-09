@@ -2108,6 +2108,14 @@ export const OrchestrationV2LatestVisibleMessageSummary = Schema.Struct({
 export type OrchestrationV2LatestVisibleMessageSummary =
   typeof OrchestrationV2LatestVisibleMessageSummary.Type;
 
+export const OrchestrationV2ThreadActiveFile = Schema.Struct({
+  /** Relative to the thread's worktree, or to the directory its agent runs in when it has none. */
+  path: TrimmedNonEmptyString,
+  op: Schema.Literals(["read", "edit"]),
+  at: Schema.DateTimeUtc,
+});
+export type OrchestrationV2ThreadActiveFile = typeof OrchestrationV2ThreadActiveFile.Type;
+
 export const OrchestrationV2ThreadShell = Schema.Struct({
   ...OrchestrationV2CreationFields,
   id: ThreadId,
@@ -2159,6 +2167,8 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
   goal: Schema.optional(Schema.NullOr(OrchestrationV2ProviderGoal)),
+  /** The file the latest file-touching tool item named. Absent from older servers. */
+  activeFile: Schema.optional(OrchestrationV2ThreadActiveFile),
   itemCount: NonNegativeInt,
   visibleItemCount: NonNegativeInt,
   createdAt: Schema.DateTimeUtc,
