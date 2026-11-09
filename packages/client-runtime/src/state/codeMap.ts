@@ -2,6 +2,7 @@ import {
   ProjectIconColor,
   repositoryGroupingKeyOf,
   type OrchestrationV2ThreadShell,
+  type ProjectCodeMapChanges,
   type ProjectCodeMapSnapshot,
   type ProjectId,
   type RepositoryIdentity,
@@ -20,9 +21,12 @@ export interface CodeMapChange {
   readonly deletions: number;
 }
 
+/** What one checkout changed since the map's base, as `projects.getCodeMapChanges` returns it. */
+export type CodeMapCheckoutChanges = Pick<ProjectCodeMapChanges, "checkout" | "files">;
+
 export interface CodeMapThread {
   readonly threadId: ThreadId;
-  /** Worktree path, or the project root when the thread has no worktree. */
+  /** The checkout the thread works in, or its own folder until that checkout's changes arrive. */
   readonly root: string;
   readonly running: boolean;
   /** Not running and its runtime is no longer active. A thread waiting on the user is neither. */
@@ -30,6 +34,7 @@ export interface CodeMapThread {
 }
 
 export interface CodeMapMarkSet {
+  /** The checkout's root. */
   readonly root: string;
   /** Every thread sharing this working tree. */
   readonly threadIds: ReadonlyArray<ThreadId>;
@@ -106,11 +111,13 @@ export interface DeriveCodeMapInput {
   readonly snapshot: ProjectCodeMapSnapshot;
   /** Threads of every project in the map. Archived and deleted ones are skipped here. */
   readonly threads: ReadonlyArray<CodeMapThreadInput>;
-  readonly changesByRoot: ReadonlyMap<string, ReadonlyArray<CodeMapChange>>;
+  /**
+   * Keyed by the folder asked about: a worktree path or a project folder. Several folders can
+   * share one checkout, and a folder is absent until its changes arrive.
+   */
+  readonly changesByRoot: ReadonlyMap<string, CodeMapCheckoutChanges>;
   /** Where each project's threads run when they have no worktree. Other projects' threads are skipped. */
   readonly projectRoots: ReadonlyMap<ProjectId, string>;
-  /** Checkout roots known beyond the snapshot's and the threads' own worktrees. */
-  readonly checkoutRoots: ReadonlyArray<string>;
   /** Absolute paths the server lists for each thread's current run. */
   readonly backfilledReads: ReadonlyMap<ThreadId, ReadonlyArray<string>>;
   readonly observedReads: ReadonlyMap<ThreadId, CodeMapReadTrail>;
@@ -185,10 +192,14 @@ interface CodeMapActor {
 }
 
 function collectMarkSets(input: MarkSetsInput) {
-  const changes = new Map<string, ReadonlyArray<CodeMapChange>>();
-  for (const [root, files] of input.changesByRoot) changes.set(normalizeRoot(root), files);
+  const changesByRoot = new Map<string, CodeMapCheckoutChanges>();
+  for (const [root, changes] of input.changesByRoot)
+    changesByRoot.set(normalizeRoot(root), changes);
   const threads: CodeMapThread[] = [];
-  const idsByRoot = new Map<string, ThreadId[]>();
+  const checkouts = new Map<
+    string,
+    { readonly threadIds: ThreadId[]; readonly files: ReadonlyArray<CodeMapChange> }
+  >();
   const actors: CodeMapActor[] = [];
   const liveIds = new Set<ThreadId>();
   for (const thread of input.threads) {
@@ -205,26 +216,28 @@ function collectMarkSets(input: MarkSetsInput) {
     }
     const threadRoot = thread.worktreePath ?? input.projectRoots.get(thread.projectId);
     if (threadRoot === undefined) continue;
-    const root = normalizeRoot(threadRoot);
+    const changes = changesByRoot.get(normalizeRoot(threadRoot));
+    const root = normalizeRoot(changes?.checkout ?? threadRoot);
+    const files = changes?.files ?? [];
     const running = isThreadWorking(thread);
-    if (!running && !changes.get(root)?.length) continue;
+    if (!running && files.length === 0) continue;
     threads.push({
       threadId: thread.id,
       root,
       running,
       finished: !running && !threadRuntimeIsActive(thread.runtime),
     });
-    const ids = idsByRoot.get(root);
-    if (ids) ids.push(thread.id);
-    else idsByRoot.set(root, [thread.id]);
+    const checkout = checkouts.get(root);
+    if (checkout) checkout.threadIds.push(thread.id);
+    else checkouts.set(root, { threadIds: [thread.id], files });
     if (running) {
       actors.push({ thread, kind: "agent", parentThreadId: null, colorThreadId: thread.id });
     }
   }
 
   const setsByPath = new Map<string, CodeMapMarkSet[]>();
-  for (const [root, threadIds] of idsByRoot) {
-    for (const change of changes.get(root) ?? []) {
+  for (const [root, { threadIds, files }] of checkouts) {
+    for (const change of files) {
       const set = { root, threadIds, insertions: change.insertions, deletions: change.deletions };
       const sets = setsByPath.get(change.path);
       if (sets) sets.push(set);
@@ -296,7 +309,9 @@ export function deriveCodeMap(input: DeriveCodeMapInput): CodeMap {
 
   const { threads, actors, setsByPath } = collectMarkSets(input);
 
-  const roots = new Set<string>([...snapshot.checkouts, ...input.checkoutRoots]);
+  // Only checkout roots: a project folder can be a subfolder, and map paths are repository-relative.
+  const roots = new Set<string>(snapshot.checkouts);
+  for (const changes of input.changesByRoot.values()) roots.add(changes.checkout);
   for (const thread of input.threads) {
     if (thread.worktreePath !== null) roots.add(thread.worktreePath);
   }

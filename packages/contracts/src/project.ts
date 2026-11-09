@@ -337,15 +337,17 @@ export const ProjectCodeMapSnapshot = Schema.Struct({
 export type ProjectCodeMapSnapshot = typeof ProjectCodeMapSnapshot.Type;
 
 export const ProjectCodeMapChangesInput = Schema.Struct({
-  /** A checkout's absolute root. */
+  /** An absolute folder inside a checkout: its root or any subfolder. */
   root: TrimmedNonEmptyString,
   baseRef: Schema.optional(TrimmedNonEmptyString),
 });
 export type ProjectCodeMapChangesInput = typeof ProjectCodeMapChangesInput.Type;
 
-// Committed, uncommitted and untracked work in `root` since it left the base branch.
+// Committed, uncommitted and untracked work in `root`'s checkout since it left the base branch.
 // Largest changes first, capped; `filesTotal` counts the uncapped list.
 export const ProjectCodeMapChanges = Schema.Struct({
+  /** The absolute root of the checkout that was diffed, as git prints it. Paths are relative to it. */
+  checkout: Schema.String,
   files: Schema.Array(
     Schema.Struct({
       path: Schema.String,

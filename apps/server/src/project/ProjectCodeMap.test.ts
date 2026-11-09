@@ -235,8 +235,11 @@ describe("ProjectCodeMap", () => {
       yield* repo.write("untracked.ts", lines(7));
       const codeMap = yield* ProjectCodeMap.ProjectCodeMap;
 
+      const fs = yield* FileSystem.FileSystem;
+      const checkout = yield* fs.realPath(repo.cwd);
       const againstDefault = yield* codeMap.changes(repo.cwd);
       assert.deepStrictEqual(againstDefault, {
+        checkout,
         files: [
           { path: "untracked.ts", insertions: 7, deletions: 0 },
           { path: "a.ts", insertions: 4, deletions: 0 },
@@ -248,8 +251,10 @@ describe("ProjectCodeMap", () => {
 
       const path = yield* Path.Path;
       yield* repo.write("docs/guide.md", lines(1));
+      const fromSubfolder = yield* codeMap.changes(path.join(repo.cwd, "docs"));
+      assert.strictEqual(fromSubfolder.checkout, checkout);
       assert.deepStrictEqual(
-        (yield* codeMap.changes(path.join(repo.cwd, "docs"))).files.map((file) => file.path),
+        fromSubfolder.files.map((file) => file.path),
         ["untracked.ts", "a.ts", "parent.ts", "child.ts", "docs/guide.md"],
       );
 

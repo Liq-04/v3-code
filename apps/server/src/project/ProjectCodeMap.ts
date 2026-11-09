@@ -34,7 +34,7 @@ export class ProjectCodeMap extends Context.Service<
       workspaceRoot: string,
       baseRef?: string,
     ) => Effect.Effect<ProjectCodeMapSnapshot, ProjectCodeMapError>;
-    /** What the checkout at `root` changed since it left the base branch. */
+    /** What the checkout containing `root` changed since it left the base branch. */
     readonly changes: (
       root: string,
       baseRef?: string,
@@ -277,16 +277,18 @@ export const make = Effect.gen(function* () {
   const changes = Effect.fn("ProjectCodeMap.changes")(function* (root: string, baseRef?: string) {
     const base = yield* resolveBase(root, baseRef);
     // A project can be rooted in a subfolder; untracked files are only listed below the cwd.
-    const checkout = yield* git
+    const toplevel = yield* git
       .execute({
         operation: "ProjectCodeMap.checkoutRoot",
         cwd: root,
         args: ["rev-parse", "--show-toplevel"],
       })
       .pipe(Effect.mapError(gitFailed));
-    return yield* git
-      .readBranchChanges(checkout.stdout.trim(), base.ref)
+    const checkout = toplevel.stdout.trim();
+    const { files, filesTotal } = yield* git
+      .readBranchChanges(checkout, base.ref)
       .pipe(Effect.mapError(gitFailed));
+    return { checkout, files, filesTotal } satisfies ProjectCodeMapChanges;
   });
 
   return ProjectCodeMap.of({ snapshot, changes });

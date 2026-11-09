@@ -122,9 +122,10 @@ function view(
   const model = deriveCodeMap({
     snapshot,
     threads,
-    changesByRoot: new Map(Object.entries(changes)),
+    changesByRoot: new Map(
+      Object.entries(changes).map(([root, files]) => [root, { checkout: root, files }]),
+    ),
     projectRoots: new Map([[PROJECT_ID, PROJECT]]),
-    checkoutRoots: [],
     backfilledReads: new Map(
       Object.entries(reads).map(([id, paths]) => [ThreadId.make(id), paths]),
     ),

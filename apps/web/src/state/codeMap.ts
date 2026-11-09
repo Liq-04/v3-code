@@ -12,7 +12,7 @@ import {
   repositoryGroupKey,
   repositoryGroupOf,
   type CodeMap,
-  type CodeMapChange,
+  type CodeMapCheckoutChanges,
   type CodeMapReadTrail,
 } from "@t3tools/client-runtime/state/code-map";
 import {
@@ -152,7 +152,6 @@ export type CodeMapView =
     };
 
 const LOADING: CodeMapView = { status: "loading" };
-const NO_CHANGES: ReadonlyArray<CodeMapChange> = [];
 const NO_TRAILS: ReadonlyMap<ThreadId, CodeMapReadTrail> = new Map();
 const RECENT_WORKTREE_MS = 72 * 60 * 60 * 1000;
 
@@ -160,7 +159,6 @@ interface CodeMapGroup {
   readonly baseKey: string;
   readonly chosenBaseRef: string | null;
   readonly projectRoots: ReadonlyMap<ProjectId, string>;
-  readonly checkoutRoots: ReadonlyArray<string>;
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
 }
 
@@ -175,10 +173,6 @@ function readGroup(get: Atom.AtomContext, ref: ScopedProjectRef): CodeMapGroup |
     baseKey,
     chosenBaseRef: get(codeMapBasesAtom)[baseKey] ?? null,
     projectRoots: new Map(group.map((project) => [project.id, project.workspaceRoot])),
-    // A project can be rooted in a subfolder; paths on the map are relative to the repository.
-    checkoutRoots: group.map(
-      (project) => project.repositoryIdentity?.rootPath ?? project.workspaceRoot,
-    ),
     threads: get(
       environmentThreadShells.threadShellsForProjectRefsAtom(
         group.map((project) => scopeProjectRef(ref.environmentId, project.id)),
@@ -191,7 +185,7 @@ function readChangesByRoot(
   get: Atom.AtomContext,
   environmentId: EnvironmentId,
   group: CodeMapGroup,
-): ReadonlyMap<string, ReadonlyArray<CodeMapChange>> {
+): ReadonlyMap<string, CodeMapCheckoutChanges> {
   // Each root costs a git status stream. Recently finished worktrees stay in, because their
   // unmerged changes are the overlaps worth seeing.
   const recentSince = Date.now() - RECENT_WORKTREE_MS;
@@ -205,14 +199,14 @@ function readChangesByRoot(
       roots.add(thread.worktreePath);
     }
   }
-  const changesByRoot = new Map<string, ReadonlyArray<CodeMapChange>>();
+  const changesByRoot = new Map<string, CodeMapCheckoutChanges>();
   for (const root of roots) {
     const changes = Option.getOrNull(
       AsyncResult.value(
         get(codeMapChanges({ environmentId, input: { root, ...baseInput(group.chosenBaseRef) } })),
       ),
     );
-    changesByRoot.set(root, changes?.files ?? NO_CHANGES);
+    if (changes !== null) changesByRoot.set(root, changes);
   }
   return changesByRoot;
 }
@@ -279,7 +273,6 @@ const codeMapViewFamily = Atom.family((key: string) => {
         threads: group.threads,
         changesByRoot: readChangesByRoot(get, ref.environmentId, group),
         projectRoots: group.projectRoots,
-        checkoutRoots: group.checkoutRoots,
         backfilledReads,
         observedReads,
       }),

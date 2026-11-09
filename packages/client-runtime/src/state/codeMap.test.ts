@@ -27,9 +27,12 @@ const PROJECT = "/work/app";
 const PROJECT_ID = ProjectId.make("app");
 const OTHER_PROJECT = "/work/app-second-checkout";
 const OTHER_PROJECT_ID = ProjectId.make("app-second-checkout");
+const DOCS_PROJECT = "/work/app/docs";
+const DOCS_PROJECT_ID = ProjectId.make("app-docs");
 const PROJECT_ROOTS = new Map([
   [PROJECT_ID, PROJECT],
   [OTHER_PROJECT_ID, OTHER_PROJECT],
+  [DOCS_PROJECT_ID, DOCS_PROJECT],
 ]);
 const ORCH = "packages/contracts/src/orchestrationV2.ts";
 
@@ -114,17 +117,29 @@ const change = (path: string, insertions = 3, deletions = 1): CodeMapChange => (
   deletions,
 });
 
+/** `checkouts` names the checkout of a root that is not one itself. */
+const changesByRoot = (
+  changes: Record<string, CodeMapChange[]>,
+  checkouts: Record<string, string> = {},
+) =>
+  new Map(
+    Object.entries(changes).map(([root, files]) => [
+      root,
+      { checkout: checkouts[root] ?? root, files },
+    ]),
+  );
+
 function derive(
   threads: CodeMapThreadInput[],
   changes: Record<string, CodeMapChange[]>,
   reads: Partial<Pick<DeriveCodeMapInput, "backfilledReads" | "observedReads">> = {},
+  checkouts: Record<string, string> = {},
 ) {
   return deriveCodeMap({
     snapshot,
     threads,
-    changesByRoot: new Map(Object.entries(changes)),
+    changesByRoot: changesByRoot(changes, checkouts),
     projectRoots: PROJECT_ROOTS,
-    checkoutRoots: [...PROJECT_ROOTS.values()],
     backfilledReads: new Map(),
     observedReads: new Map(),
     ...reads,
@@ -187,6 +202,20 @@ describe("deriveCodeMap", () => {
     expect(model.marks).toHaveLength(1);
     expect(model.marks[0]!.sets).toEqual([
       { root: PROJECT, threadIds: ids("a", "b"), insertions: 3, deletions: 1 },
+    ]);
+    expect(model.overlaps).toEqual([]);
+  });
+
+  it("gives two projects inside one checkout a single mark set and no overlap", () => {
+    const model = derive(
+      [thread("a", { running: true }), thread("b", { project: DOCS_PROJECT_ID, running: true })],
+      { [PROJECT]: [change(ORCH)], [DOCS_PROJECT]: [change(ORCH)] },
+      {},
+      { [DOCS_PROJECT]: PROJECT },
+    );
+    expect(model.threads.map((t) => t.root)).toEqual([PROJECT, PROJECT]);
+    expect(model.marks.map((m) => m.sets)).toEqual([
+      [{ root: PROJECT, threadIds: ids("a", "b"), insertions: 3, deletions: 1 }],
     ]);
     expect(model.overlaps).toEqual([]);
   });
@@ -311,6 +340,11 @@ describe("repository group", () => {
       path: "/wt/unlisted/README.md",
       expected: "README.md",
     },
+    {
+      name: "inside a project rooted in a checkout's subfolder",
+      path: `${DOCS_PROJECT}/guide.md`,
+      expected: "docs/guide.md",
+    },
     { name: "outside every checkout", path: "/etc/hosts", expected: null },
     { name: "a checkout root itself", path: "/wt/a", expected: null },
   ])("places a sprite on a path $name", ({ path, expected }) => {
@@ -378,7 +412,8 @@ describe("read trail", () => {
         thread("s", { subagentOf: "a", running: true }),
         thread("b", { project: OTHER_PROJECT_ID, running: true }),
       ],
-      {},
+      // A separate clone is a checkout the snapshot cannot list; its changes name it.
+      { [OTHER_PROJECT]: [] },
       {
         backfilledReads: new Map([
           [ThreadId.make("a"), [A]],
@@ -533,7 +568,7 @@ describe("deriveCodeMapOverlaps", () => {
   const overlaps = (threads: CodeMapThreadInput[], changes: Record<string, CodeMapChange[]>) =>
     deriveCodeMapOverlaps({
       threads,
-      changesByRoot: new Map(Object.entries(changes)),
+      changesByRoot: changesByRoot(changes),
       projectRoots: PROJECT_ROOTS,
     });
 
