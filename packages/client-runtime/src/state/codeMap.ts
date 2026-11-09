@@ -8,6 +8,7 @@ import {
   type RepositoryIdentity,
   type RunId,
   type ThreadId,
+  type VcsStatusResult,
 } from "@t3tools/contracts";
 import { workspaceRelativeFilePath } from "@t3tools/shared/path";
 import * as DateTime from "effect/DateTime";
@@ -156,6 +157,23 @@ export function checkoutRelativePath(path: string, roots: Iterable<string>): str
     bestRootLength = root.length;
   }
   return best;
+}
+
+/**
+ * Changes when a checkout's diff against the base can list other paths: another branch, other
+ * dirty paths, or committed or untracked lines moving (the branch totals the tracked working
+ * tree does not account for). More edits to an already-dirty file move both totals alike.
+ */
+export function changesFingerprint(
+  status: Pick<VcsStatusResult, "refName" | "workingTree" | "branchChanges">,
+): string {
+  const { workingTree, branchChanges } = status;
+  return JSON.stringify([
+    status.refName,
+    workingTree.files.map((file) => file.path).sort(),
+    branchChanges ? branchChanges.insertions - workingTree.insertions : null,
+    branchChanges ? branchChanges.deletions - workingTree.deletions : null,
+  ]);
 }
 
 const THREAD_COLORS = ProjectIconColor.literals.filter((color) => color !== "gray");

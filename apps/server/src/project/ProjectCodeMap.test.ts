@@ -11,7 +11,7 @@ import * as ServerConfig from "../config.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as ProjectCodeMap from "./ProjectCodeMap.ts";
 
-const layerTest = (numstatRuns: Ref.Ref<number>) =>
+const layerTest = (runs: Ref.Ref<number>, operation = "ProjectCodeMap.numstat") =>
   ProjectCodeMap.layer.pipe(
     Layer.provideMerge(
       Layer.effect(
@@ -21,8 +21,8 @@ const layerTest = (numstatRuns: Ref.Ref<number>) =>
           return GitVcsDriver.GitVcsDriver.of({
             ...git,
             execute: (input) =>
-              (input.operation === "ProjectCodeMap.numstat"
-                ? Ref.update(numstatRuns, (runs) => runs + 1)
+              (input.operation === operation
+                ? Ref.update(runs, (count) => count + 1)
                 : Effect.void
               ).pipe(Effect.andThen(git.execute(input))),
           });
@@ -220,8 +220,9 @@ describe("ProjectCodeMap", () => {
     }).pipe(Effect.scoped, Effect.provide(layerTest(numstatRuns)));
   });
 
-  it.effect("diffs a stacked branch against the chosen base and counts untracked files", () =>
-    Effect.gen(function* () {
+  it.effect("diffs a stacked branch against the chosen base and counts untracked files", () => {
+    const baseLookups = Ref.makeUnsafe(0);
+    return Effect.gen(function* () {
       const repo = yield* makeRepository();
       yield* repo.write("a.ts", lines(1));
       yield* repo.commit("initial");
@@ -258,16 +259,19 @@ describe("ProjectCodeMap", () => {
         ["untracked.ts", "a.ts", "parent.ts", "child.ts", "docs/guide.md"],
       );
 
+      yield* Ref.set(baseLookups, 0);
       const againstParent = yield* codeMap.changes(repo.cwd, "parent");
       assert.deepStrictEqual(
         againstParent.files.map((file) => file.path),
         ["untracked.ts", "a.ts", "child.ts", "docs/guide.md"],
       );
+      // A named base is the only one looked up: the default branch is not resolved beside it.
+      assert.strictEqual(yield* Ref.get(baseLookups), 1);
 
       const error = yield* codeMap.changes(repo.cwd, "missing").pipe(Effect.flip);
       assert.strictEqual(error.failure, "base_not_found");
-    }).pipe(Effect.scoped, Effect.provide(layerTest(Ref.makeUnsafe(0)))),
-  );
+    }).pipe(Effect.scoped, Effect.provide(layerTest(baseLookups, "ProjectCodeMap.resolveTree")));
+  });
 
   it.effect("serves an unchanged tree from cache and rereads after a new commit", () => {
     const numstatRuns = Ref.makeUnsafe(0);

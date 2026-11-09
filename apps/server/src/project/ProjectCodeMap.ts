@@ -147,10 +147,8 @@ export const make = Effect.gen(function* () {
     return null;
   });
 
-  const resolveBase = Effect.fn("ProjectCodeMap.resolveBase")(function* (
-    cwd: string,
-    requested: string | undefined,
-  ) {
+  /** The primary remote, or null without one. Fails outside a repository. */
+  const repositoryRemote = Effect.fn("ProjectCodeMap.repositoryRemote")(function* (cwd: string) {
     const inside = yield* git
       .execute({
         operation: "ProjectCodeMap.isRepository",
@@ -162,32 +160,32 @@ export const make = Effect.gen(function* () {
     if (inside.exitCode !== 0) {
       return yield* new ProjectCodeMapError({ failure: "not_a_git_repository" });
     }
+    return yield* git.resolvePrimaryRemoteName(cwd).pipe(Effect.orElseSucceed(() => null));
+  });
 
-    const remote = yield* git.resolvePrimaryRemoteName(cwd).pipe(Effect.orElseSucceed(() => null));
+  const resolveDefaultBase = Effect.fn("ProjectCodeMap.resolveDefaultBase")(function* (
+    cwd: string,
+    remote: string | null,
+  ) {
     const remoteDefault =
       remote === null
         ? null
         : yield* git.resolveDefaultBranchName(cwd, remote).pipe(Effect.mapError(gitFailed));
-    const defaultBase = yield* firstTree(
+    return yield* firstTree(
       cwd,
       [...(remoteDefault === null ? [] : [remoteDefault]), ...FALLBACK_DEFAULT_BRANCHES].flatMap(
         (name) => branchCandidates(name, remote),
       ),
     );
-    const base =
-      requested === undefined
-        ? defaultBase
-        : yield* firstTree(cwd, [
-            ...branchCandidates(requested, remote),
-            { name: requested, ref: `refs/remotes/${requested}` },
-          ]);
-    if (base === null) {
-      return yield* new ProjectCodeMapError({
-        failure: requested === undefined ? "default_branch_not_found" : "base_not_found",
-      });
-    }
-    return { ...base, defaultBaseRef: defaultBase?.name ?? null };
   });
+
+  const resolveNamedBase = (cwd: string, remote: string | null, name: string) =>
+    firstTree(cwd, [...branchCandidates(name, remote), { name, ref: `refs/remotes/${name}` }]);
+
+  const baseNotFound = (requested: string | undefined) =>
+    new ProjectCodeMapError({
+      failure: requested === undefined ? "default_branch_not_found" : "base_not_found",
+    });
 
   const build = Effect.fn("ProjectCodeMap.build")(function* (key: CodeMapCacheKey) {
     const emptyTree = yield* git.execute({
@@ -251,7 +249,11 @@ export const make = Effect.gen(function* () {
     workspaceRoot: string,
     baseRef?: string,
   ) {
-    const base = yield* resolveBase(workspaceRoot, baseRef);
+    const remote = yield* repositoryRemote(workspaceRoot);
+    const defaultBase = yield* resolveDefaultBase(workspaceRoot, remote);
+    const base =
+      baseRef === undefined ? defaultBase : yield* resolveNamedBase(workspaceRoot, remote, baseRef);
+    if (base === null) return yield* baseNotFound(baseRef);
     // Checkouts come and go without moving the base tree, so they stay out of the cache.
     const [tree, checkouts] = yield* Effect.all(
       [
@@ -269,13 +271,19 @@ export const make = Effect.gen(function* () {
     );
     return {
       ...tree,
-      defaultBaseRef: base.defaultBaseRef,
+      defaultBaseRef: defaultBase?.name ?? null,
       checkouts,
     } satisfies ProjectCodeMapSnapshot;
   });
 
   const changes = Effect.fn("ProjectCodeMap.changes")(function* (root: string, baseRef?: string) {
-    const base = yield* resolveBase(root, baseRef);
+    const remote = yield* repositoryRemote(root);
+    // This runs on every status change of every watched checkout: only the base it diffs is resolved.
+    const base =
+      baseRef === undefined
+        ? yield* resolveDefaultBase(root, remote)
+        : yield* resolveNamedBase(root, remote, baseRef);
+    if (base === null) return yield* baseNotFound(baseRef);
     // A project can be rooted in a subfolder; untracked files are only listed below the cwd.
     const toplevel = yield* git
       .execute({

@@ -10,6 +10,7 @@ import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  changesFingerprint,
   checkoutRelativePath,
   deriveCodeMap,
   deriveCodeMapOverlaps,
@@ -560,6 +561,63 @@ describe("threadColor", () => {
     for (let i = 0; i < 200; i++) colors.add(threadColor(ThreadId.make(`t-${i}`)));
     for (const color of colors) expect(ProjectIconColor.literals).toContain(color);
     expect(colors.size).toBeGreaterThan(8);
+  });
+});
+
+describe("changesFingerprint", () => {
+  const file = (path: string, insertions = 0, deletions = 0) => ({ path, insertions, deletions });
+  const status = (
+    files: ReadonlyArray<ReturnType<typeof file>>,
+    branch: { insertions: number; deletions: number },
+    refName = "feature",
+  ): Parameters<typeof changesFingerprint>[0] => ({
+    refName,
+    workingTree: {
+      files,
+      insertions: files.reduce((sum, each) => sum + each.insertions, 0),
+      deletions: files.reduce((sum, each) => sum + each.deletions, 0),
+    },
+    branchChanges: { baseRef: "main", ...branch },
+  });
+  const dirty = status([file("a.ts", 3, 1), file("new/")], { insertions: 13, deletions: 1 });
+
+  it.each([
+    {
+      name: "more edits to a file that is already dirty",
+      next: status([file("a.ts", 9, 4), file("new/")], { insertions: 19, deletions: 4 }),
+      rereads: false,
+    },
+    {
+      name: "the same files listed in another order",
+      next: status([file("new/"), file("a.ts", 3, 1)], { insertions: 13, deletions: 1 }),
+      rereads: false,
+    },
+    {
+      name: "another dirty path",
+      next: status([file("a.ts", 3, 1), file("b.ts", 1, 0), file("new/")], {
+        insertions: 14,
+        deletions: 1,
+      }),
+      rereads: true,
+    },
+    {
+      name: "another file inside a folder that is already untracked",
+      next: status([file("a.ts", 3, 1), file("new/")], { insertions: 20, deletions: 1 }),
+      rereads: true,
+    },
+    {
+      name: "a branch switch",
+      next: status([file("a.ts", 3, 1), file("new/")], { insertions: 13, deletions: 1 }, "other"),
+      rereads: true,
+    },
+  ])("$name", ({ next, rereads }) => {
+    expect(changesFingerprint(next) !== changesFingerprint(dirty)).toBe(rereads);
+  });
+
+  it("changes when a commit lands on a clean working tree", () => {
+    expect(changesFingerprint(status([], { insertions: 13, deletions: 1 }))).not.toBe(
+      changesFingerprint(status([], { insertions: 21, deletions: 1 })),
+    );
   });
 });
 

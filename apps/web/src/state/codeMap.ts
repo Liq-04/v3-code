@@ -6,6 +6,7 @@ import {
   scopeProjectRef,
 } from "@t3tools/client-runtime/environment";
 import {
+  changesFingerprint,
   deriveCodeMap,
   deriveCodeMapOverlaps,
   observeReadTrails,
@@ -92,33 +93,27 @@ export const codeMapSnapshotAtom = (ref: ScopedProjectRef, baseRef: string | nul
 const statusOf = (environmentId: EnvironmentId, root: string) =>
   vcsEnvironment.status({ environmentId, input: { cwd: root, includeRemote: false } });
 
-// Changes everything a checkout's diff against the base can depend on, so the diff is reread
-// exactly when its git status stream reports something new.
-const statusFingerprintFamily = Atom.family((key: string) => {
+/** Null until the checkout's git status arrives. */
+const changesFingerprintFamily = Atom.family((key: string) => {
   const { environmentId, root } = JSON.parse(key) as {
     readonly environmentId: EnvironmentId;
     readonly root: string;
   };
   return Atom.make((get) => {
     const status = Option.getOrNull(AsyncResult.value(get(statusOf(environmentId, root))));
-    return status === null
-      ? null
-      : JSON.stringify([
-          status.refName,
-          status.workingTree.files,
-          status.branchChanges?.insertions,
-          status.branchChanges?.deletions,
-        ]);
+    return status === null ? null : changesFingerprint(status);
   });
 });
+
+const changesFingerprintAtom = (environmentId: EnvironmentId, root: string) =>
+  changesFingerprintFamily(JSON.stringify({ environmentId, root }));
 
 const codeMapChanges = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
   label: "environment-data:projects:code-map-changes",
   tag: WS_METHODS.projectsGetCodeMapChanges,
   staleTimeMs: 30_000,
   idleTtlMs: 5 * 60_000,
-  refreshTrigger: ({ environmentId, input }) =>
-    statusFingerprintFamily(JSON.stringify({ environmentId, root: input.root })),
+  refreshTrigger: ({ environmentId, input }) => changesFingerprintAtom(environmentId, input.root),
 });
 
 const runReadPaths = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
@@ -201,6 +196,8 @@ function readChangesByRoot(
   }
   const changesByRoot = new Map<string, CodeMapCheckoutChanges>();
   for (const root of roots) {
+    // The first status would reread a diff that was asked for before it arrived.
+    if (get(changesFingerprintAtom(environmentId, root)) === null) continue;
     const changes = Option.getOrNull(
       AsyncResult.value(
         get(codeMapChanges({ environmentId, input: { root, ...baseInput(group.chosenBaseRef) } })),
