@@ -1,4 +1,8 @@
-import { ProjectCodeMapError, type ProjectCodeMapSnapshot } from "@t3tools/contracts";
+import {
+  ProjectCodeMapError,
+  type ProjectCodeMapChanges,
+  type ProjectCodeMapSnapshot,
+} from "@t3tools/contracts";
 import * as Cache from "effect/Cache";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
@@ -25,9 +29,16 @@ class CodeMapCacheKey extends Data.Class<{
 export class ProjectCodeMap extends Context.Service<
   ProjectCodeMap,
   {
+    /** `baseRef` is a branch name; omitted means the repository's default branch. */
     readonly snapshot: (
       workspaceRoot: string,
+      baseRef?: string,
     ) => Effect.Effect<ProjectCodeMapSnapshot, ProjectCodeMapError>;
+    /** What the checkout at `root` changed since it left the base branch. */
+    readonly changes: (
+      root: string,
+      baseRef?: string,
+    ) => Effect.Effect<ProjectCodeMapChanges, ProjectCodeMapError>;
   }
 >()("t3/project/ProjectCodeMap") {}
 
@@ -107,7 +118,28 @@ export const make = Effect.gen(function* () {
 
   const gitFailed = (cause: unknown) => new ProjectCodeMapError({ failure: "git_failed", cause });
 
-  const readTree = Effect.fn("ProjectCodeMap.readTree")(function* (cwd: string) {
+  const firstTree = Effect.fn("ProjectCodeMap.firstTree")(function* (
+    cwd: string,
+    refs: ReadonlyArray<string>,
+  ) {
+    for (const ref of refs) {
+      const tree = yield* git
+        .execute({
+          operation: "ProjectCodeMap.resolveTree",
+          cwd,
+          args: ["rev-parse", "--verify", "--quiet", `${ref}^{tree}`],
+          allowNonZeroExit: true,
+        })
+        .pipe(Effect.mapError(gitFailed));
+      if (tree.exitCode === 0) return { ref, treeSha: tree.stdout.trim() };
+    }
+    return null;
+  });
+
+  const resolveBase = Effect.fn("ProjectCodeMap.resolveBase")(function* (
+    cwd: string,
+    requested: string | undefined,
+  ) {
     const inside = yield* git
       .execute({
         operation: "ProjectCodeMap.isRepository",
@@ -125,26 +157,29 @@ export const make = Effect.gen(function* () {
       remote === null
         ? null
         : yield* git.resolveDefaultBranchName(cwd, remote).pipe(Effect.mapError(gitFailed));
-    const candidates = [
+    const defaultBase = yield* firstTree(cwd, [
       ...(remote !== null && remoteDefault !== null
         ? [`refs/heads/${remoteDefault}`, `refs/remotes/${remote}/${remoteDefault}`]
         : []),
       ...FALLBACK_DEFAULT_BRANCHES.map((name) => `refs/heads/${name}`),
-    ];
-    for (const ref of candidates) {
-      const tree = yield* git
-        .execute({
-          operation: "ProjectCodeMap.resolveTree",
-          cwd,
-          args: ["rev-parse", "--verify", "--quiet", `${ref}^{tree}`],
-          allowNonZeroExit: true,
-        })
-        .pipe(Effect.mapError(gitFailed));
-      if (tree.exitCode === 0) {
-        return { treeSha: tree.stdout.trim(), baseRef: shortRefName(ref) };
-      }
+    ]);
+    const base =
+      requested === undefined
+        ? defaultBase
+        : yield* firstTree(cwd, [
+            `refs/heads/${requested}`,
+            ...(remote === null ? [] : [`refs/remotes/${remote}/${requested}`]),
+            `refs/remotes/${requested}`,
+          ]);
+    if (base === null) {
+      return yield* new ProjectCodeMapError({
+        failure: requested === undefined ? "default_branch_not_found" : "base_not_found",
+      });
     }
-    return yield* new ProjectCodeMapError({ failure: "default_branch_not_found" });
+    return {
+      ...base,
+      defaultBaseRef: defaultBase === null ? null : shortRefName(defaultBase.ref),
+    };
   });
 
   const build = Effect.fn("ProjectCodeMap.build")(function* (key: CodeMapCacheKey) {
@@ -194,7 +229,7 @@ export const make = Effect.gen(function* () {
         parsed.map((entry) => ({ ...entry, vendored: vendoredPaths.has(entry.path) })),
         MAX_LISTED_FILES,
       ),
-    } satisfies ProjectCodeMapSnapshot;
+    };
   }, Effect.mapError(gitFailed));
 
   const cache = yield* Cache.makeWith(build, {
@@ -205,12 +240,42 @@ export const make = Effect.gen(function* () {
     }),
   });
 
-  const snapshot = Effect.fn("ProjectCodeMap.snapshot")(function* (workspaceRoot: string) {
-    const { treeSha, baseRef } = yield* readTree(workspaceRoot);
-    return yield* Cache.get(cache, new CodeMapCacheKey({ cwd: workspaceRoot, treeSha, baseRef }));
+  const snapshot = Effect.fn("ProjectCodeMap.snapshot")(function* (
+    workspaceRoot: string,
+    baseRef?: string,
+  ) {
+    const base = yield* resolveBase(workspaceRoot, baseRef);
+    // Checkouts come and go without moving the base tree, so they stay out of the cache.
+    const [tree, checkouts] = yield* Effect.all(
+      [
+        Cache.get(
+          cache,
+          new CodeMapCacheKey({
+            cwd: workspaceRoot,
+            treeSha: base.treeSha,
+            baseRef: shortRefName(base.ref),
+          }),
+        ),
+        git.listWorktreePaths(workspaceRoot).pipe(Effect.mapError(gitFailed)),
+      ],
+      { concurrency: "unbounded" },
+    );
+    return {
+      ...tree,
+      defaultBaseRef: base.defaultBaseRef,
+      checkouts,
+    } satisfies ProjectCodeMapSnapshot;
   });
 
-  return ProjectCodeMap.of({ snapshot });
+  const changes = Effect.fn("ProjectCodeMap.changes")(function* (root: string, baseRef?: string) {
+    const base = yield* resolveBase(root, baseRef);
+    const { files, filesTotal } = yield* git
+      .readBranchChanges(root, base.ref)
+      .pipe(Effect.mapError(gitFailed));
+    return { files, filesTotal } satisfies ProjectCodeMapChanges;
+  });
+
+  return ProjectCodeMap.of({ snapshot, changes });
 });
 
 export const layer = Layer.effect(ProjectCodeMap, make);

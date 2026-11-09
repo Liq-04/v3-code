@@ -3020,10 +3020,12 @@ export const layerWsRpc = (
                       projectId: input.projectId,
                     }),
                   ),
-                onSome: (project) => projectCodeMap.snapshot(project.workspaceRoot),
+                onSome: (project) => projectCodeMap.snapshot(project.workspaceRoot, input.baseRef),
               }),
             ),
           ),
+        [WS_METHODS.projectsGetCodeMapChanges]: (input) =>
+          projectCodeMap.changes(input.root, input.baseRef),
         [WS_METHODS.projectsListIgnoredFiles]: (input) =>
           workspaceEntries.listIgnoredFiles(input).pipe(
             Effect.mapError(

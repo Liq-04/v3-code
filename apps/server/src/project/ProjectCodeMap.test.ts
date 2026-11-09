@@ -134,6 +134,84 @@ describe("ProjectCodeMap", () => {
     }).pipe(Effect.scoped, Effect.provide(layerTest(Ref.makeUnsafe(0)))),
   );
 
+  it.effect("reads the requested base branch and names the default beside it", () =>
+    Effect.gen(function* () {
+      const repo = yield* makeRepository();
+      yield* repo.write("a.ts", lines(1));
+      yield* repo.commit("initial");
+      yield* repo.run("checkout", "-b", "dev");
+      yield* repo.write("b.ts", lines(2));
+      yield* repo.commit("dev work");
+      yield* repo.run("checkout", "main");
+      const codeMap = yield* ProjectCodeMap.ProjectCodeMap;
+
+      const snapshot = yield* codeMap.snapshot(repo.cwd, "dev");
+      assert.strictEqual(snapshot.baseRef, "dev");
+      assert.strictEqual(snapshot.defaultBaseRef, "main");
+      assert.deepStrictEqual(snapshot.files.paths, ["b.ts", "a.ts"]);
+
+      const error = yield* codeMap.snapshot(repo.cwd, "missing").pipe(Effect.flip);
+      assert.strictEqual(error.failure, "base_not_found");
+    }).pipe(Effect.scoped, Effect.provide(layerTest(Ref.makeUnsafe(0)))),
+  );
+
+  it.effect("lists linked worktrees as checkouts without rebuilding the tree", () => {
+    const numstatRuns = Ref.makeUnsafe(0);
+    return Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const repo = yield* makeRepository();
+      yield* repo.write("a.ts", lines(1));
+      yield* repo.commit("initial");
+      const codeMap = yield* ProjectCodeMap.ProjectCodeMap;
+      const root = yield* fs.realPath(repo.cwd);
+      assert.deepStrictEqual((yield* codeMap.snapshot(repo.cwd)).checkouts, [root]);
+
+      const linked = path.join(yield* fs.makeTempDirectoryScoped(), "linked");
+      yield* repo.run("worktree", "add", "-b", "feature", linked);
+      const snapshot = yield* codeMap.snapshot(repo.cwd);
+      assert.deepStrictEqual(snapshot.checkouts, [root, yield* fs.realPath(linked)]);
+      assert.strictEqual(yield* Ref.get(numstatRuns), 1);
+    }).pipe(Effect.scoped, Effect.provide(layerTest(numstatRuns)));
+  });
+
+  it.effect("diffs a stacked branch against the chosen base and counts untracked files", () =>
+    Effect.gen(function* () {
+      const repo = yield* makeRepository();
+      yield* repo.write("a.ts", lines(1));
+      yield* repo.commit("initial");
+      yield* repo.run("checkout", "-b", "parent");
+      yield* repo.write("parent.ts", lines(3));
+      yield* repo.commit("parent work");
+      yield* repo.run("checkout", "-b", "child");
+      yield* repo.write("child.ts", lines(2));
+      yield* repo.commit("child work");
+      yield* repo.write("a.ts", lines(5));
+      yield* repo.write("untracked.ts", lines(7));
+      const codeMap = yield* ProjectCodeMap.ProjectCodeMap;
+
+      const againstDefault = yield* codeMap.changes(repo.cwd);
+      assert.deepStrictEqual(againstDefault, {
+        files: [
+          { path: "untracked.ts", insertions: 7, deletions: 0 },
+          { path: "a.ts", insertions: 4, deletions: 0 },
+          { path: "parent.ts", insertions: 3, deletions: 0 },
+          { path: "child.ts", insertions: 2, deletions: 0 },
+        ],
+        filesTotal: 4,
+      });
+
+      const againstParent = yield* codeMap.changes(repo.cwd, "parent");
+      assert.deepStrictEqual(
+        againstParent.files.map((file) => file.path),
+        ["untracked.ts", "a.ts", "child.ts"],
+      );
+
+      const error = yield* codeMap.changes(repo.cwd, "missing").pipe(Effect.flip);
+      assert.strictEqual(error.failure, "base_not_found");
+    }).pipe(Effect.scoped, Effect.provide(layerTest(Ref.makeUnsafe(0)))),
+  );
+
   it.effect("serves an unchanged tree from cache and rereads after a new commit", () => {
     const numstatRuns = Ref.makeUnsafe(0);
     return Effect.gen(function* () {
