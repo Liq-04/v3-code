@@ -40,6 +40,7 @@ import {
   type ScheduledTaskId,
   ThreadId,
   type TurnItemId,
+  withoutDiscussionAttribution,
 } from "@t3tools/contracts";
 import { delegatedTaskProgress } from "@t3tools/provider-core/server/subagentProjection";
 import { threadTranscriptHeader } from "@t3tools/shared/threadTranscript";
@@ -85,6 +86,9 @@ export function withCreationProvenance(
       return { ...rest, ...provenance };
     }
     case "message.dispatch":
+      return { ...withoutDiscussionAttribution(command), ...provenance };
+    case "queued-run.edit":
+      return withoutDiscussionAttribution(command);
     case "thread.fork":
     case "thread.merge_back":
     case "delegated_task.request":
