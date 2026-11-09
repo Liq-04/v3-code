@@ -25,7 +25,15 @@ function durationLabel(item: DiscussionItem): string | null {
   return minutes < 1 ? "under a minute" : `${minutes} min`;
 }
 
-function TranscriptLines({ lines }: { readonly lines: ReadonlyArray<DiscussionTranscriptLine> }) {
+function TranscriptLines({
+  lines,
+  cwd,
+  threadRef,
+}: {
+  readonly lines: ReadonlyArray<DiscussionTranscriptLine>;
+  readonly cwd: string | undefined;
+  readonly threadRef: ReturnType<typeof scopeThreadRef>;
+}) {
   return (
     <ol className="grid gap-2">
       {lines.map((line) => (
@@ -38,7 +46,11 @@ function TranscriptLines({ lines }: { readonly lines: ReadonlyArray<DiscussionTr
           >
             {line.speaker === "user" ? "You" : "Agent"}
           </span>
-          <span className="whitespace-pre-wrap wrap-anywhere text-sm">{line.text}</span>
+          {line.speaker === "user" ? (
+            <span className="whitespace-pre-wrap wrap-anywhere text-sm">{line.text}</span>
+          ) : (
+            <ChatMarkdown text={line.text} cwd={cwd} threadRef={threadRef} />
+          )}
         </li>
       ))}
     </ol>
@@ -78,7 +90,7 @@ export function DiscussionTimelineRow({
           Discussion · live
         </span>
         {lines.length > 0 ? (
-          <TranscriptLines lines={lines} />
+          <TranscriptLines lines={lines} cwd={cwd} threadRef={threadRef} />
         ) : (
           <span className="text-sm text-muted-foreground">Talk to start.</span>
         )}
@@ -119,7 +131,7 @@ export function DiscussionTimelineRow({
           </CollapsibleTrigger>
           <CollapsiblePanel>
             <div className="pt-2">
-              <TranscriptLines lines={lines} />
+              <TranscriptLines lines={lines} cwd={cwd} threadRef={threadRef} />
             </div>
           </CollapsiblePanel>
         </Collapsible>
