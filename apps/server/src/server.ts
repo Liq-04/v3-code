@@ -15,7 +15,6 @@ import * as NodeHttp from "node:http";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import { EnvironmentHttpApi, type RepositoryIdentity } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Duration from "effect/Duration";
@@ -842,12 +841,7 @@ const layerMakeRoutes = Layer.mergeAll(
   // Voice discussions, shared by the start RPC, the media socket and the MCP hang-up tool.
   Layer.provide(
     DiscussionService.layer.pipe(
-      Layer.provide(
-        ElevenLabsSynth.layerElevenLabs.pipe(
-          Layer.provide(SecretResolver.layer),
-          Layer.provide(NodeSocket.layerWebSocketConstructor),
-        ),
-      ),
+      Layer.provide(ElevenLabsSynth.layerElevenLabs.pipe(Layer.provide(SecretResolver.layer))),
       Layer.provide(RuntimeLayer.layerEventSink),
       Layer.provide(ProjectionStoreV2.layer),
     ),

@@ -3,102 +3,114 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Socket from "effect/socket/Socket";
+import * as Stream from "effect/Stream";
+import { HttpClient, HttpClientResponse } from "effect/http";
 
 import * as SecretResolver from "../secrets/SecretResolver.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import {
-  DiscussionSynth,
-  ELEVENLABS_CLOSE_MESSAGE,
-  elevenLabsOpenMessage,
-  elevenLabsSayMessage,
-  elevenLabsStreamUrl,
-  layerElevenLabs,
-  parseElevenLabsFrame,
-} from "./ElevenLabsSynth.ts";
+import { DiscussionSynth, layerElevenLabs } from "./ElevenLabsSynth.ts";
 
-/** Like a browser WebSocket: it exists only once the client starts reading, and records sends. */
-class FakeWebSocket extends EventTarget {
-  static created: Array<FakeWebSocket> = [];
-  readonly readyState = 1;
-  binaryType = "blob";
-  readonly sent: Array<unknown> = [];
-  readonly url: string;
-  constructor(url: string) {
-    super();
-    this.url = url;
-    FakeWebSocket.created.push(this);
-  }
-  send(data: unknown) {
-    this.sent.push(data);
-  }
-  close() {}
+interface SentRequest {
+  readonly url: URL;
+  readonly key: string | undefined;
+  readonly body: Record<string, unknown>;
 }
 
-it.effect("opening a voice session connects and sends the key before any line", () =>
-  Effect.gen(function* () {
-    FakeWebSocket.created = [];
-    const synth = yield* DiscussionSynth;
-    const session = yield* synth.open();
-    yield* session.say("Running the tests.");
-    const [socket] = FakeWebSocket.created;
-    assert.deepEqual(socket?.sent, [
-      elevenLabsOpenMessage("key"),
-      elevenLabsSayMessage("Running the tests."),
-    ]);
-  }).pipe(
-    Effect.scoped,
-    Effect.provide(
-      layerElevenLabs.pipe(
-        Layer.provide(SecretResolver.layer),
-        Layer.provideMerge(
-          ServerSettings.layerTest({ voiceSynthesis: { elevenlabs: "key", voiceId: "" } }),
-        ),
-        Layer.provide(
-          Layer.succeed(
-            Socket.WebSocketConstructor,
-            (url) => new FakeWebSocket(url) as unknown as globalThis.WebSocket,
-          ),
-        ),
-        Layer.provide(Layer.merge(NodeServices.layer, NodeCrypto.layer)),
-      ),
-    ),
-  ),
-);
+/** ElevenLabs as seen over HTTP: records each request and streams back the given chunks. */
+const fakeElevenLabs = (reply: (body: Record<string, unknown>) => Response) => {
+  const sent: Array<SentRequest> = [];
+  const client = HttpClient.make((request) => {
+    const body =
+      request.body._tag === "Uint8Array"
+        ? (JSON.parse(new TextDecoder().decode(request.body.body)) as Record<string, unknown>)
+        : {};
+    sent.push({ url: new URL(request.url), key: request.headers["xi-api-key"], body });
+    return Effect.succeed(HttpClientResponse.fromWeb(request, reply(body)));
+  });
+  return { sent, client };
+};
 
-it("frames the stream-input protocol: flash model, 24 kHz PCM, flushed lines, explicit close", () => {
-  const url = new URL(elevenLabsStreamUrl("EST9Ui6982FZPSi7gCHi"));
-  assert.equal(url.pathname, "/v1/text-to-speech/EST9Ui6982FZPSi7gCHi/stream-input");
-  assert.equal(url.searchParams.get("model_id"), "eleven_flash_v2_5");
-  assert.equal(url.searchParams.get("output_format"), "pcm_24000");
-  assert.deepEqual(JSON.parse(elevenLabsOpenMessage("secret")), {
-    text: " ",
-    xi_api_key: "secret",
-  });
-  assert.deepEqual(JSON.parse(elevenLabsSayMessage("Running the tests.")), {
-    text: "Running the tests. ",
-    flush: true,
-  });
-  assert.deepEqual(JSON.parse(ELEVENLABS_CLOSE_MESSAGE), { text: "" });
+const chunked = (...chunks: ReadonlyArray<ReadonlyArray<number>>) =>
+  new Response(
+    new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(Uint8Array.from(chunk));
+        controller.close();
+      },
+    }),
+  );
+
+const withSynth = (client: HttpClient.HttpClient) =>
+  Effect.provide(
+    layerElevenLabs.pipe(
+      Layer.provide(SecretResolver.layer),
+      Layer.provideMerge(
+        ServerSettings.layerTest({ voiceSynthesis: { elevenlabs: "key", voiceId: "" } }),
+      ),
+      Layer.provide(Layer.succeed(HttpClient.HttpClient, client)),
+      Layer.provide(Layer.merge(NodeServices.layer, NodeCrypto.layer)),
+    ),
+  );
+
+it.effect("speaks each sentence as its own request, in order, carrying the one before", () => {
+  const elevenLabs = fakeElevenLabs((body) =>
+    body.text === "Running the tests." ? chunked([1, 2, 3], [4]) : chunked([5, 6]),
+  );
+  return Effect.gen(function* () {
+    const session = yield* (yield* DiscussionSynth).open();
+    yield* session.say("Running the tests.");
+    yield* session.say("Back in a second.");
+    yield* session.finish;
+    const audio = yield* Stream.runCollect(session.audio);
+
+    assert.deepEqual(
+      audio.map((pcm) => [...pcm]),
+      [
+        [1, 2],
+        [3, 4],
+        [5, 6],
+      ],
+    );
+    assert.deepEqual(
+      elevenLabs.sent.map(({ url, key, body }) => ({
+        path: url.pathname,
+        format: url.searchParams.get("output_format"),
+        key,
+        body,
+      })),
+      [
+        {
+          path: "/v1/text-to-speech/EST9Ui6982FZPSi7gCHi/stream",
+          format: "pcm_24000",
+          key: "key",
+          body: {
+            text: "Running the tests.",
+            model_id: "eleven_v4_turbo",
+            voice_settings: { stability: 0.4 },
+          },
+        },
+        {
+          path: "/v1/text-to-speech/EST9Ui6982FZPSi7gCHi/stream",
+          format: "pcm_24000",
+          key: "key",
+          body: {
+            text: "Back in a second.",
+            model_id: "eleven_v4_turbo",
+            voice_settings: { stability: 0.4 },
+            previous_text: "Running the tests.",
+          },
+        },
+      ],
+    );
+  }).pipe(Effect.scoped, withSynth(elevenLabs.client));
 });
 
-it.effect("decodes audio chunks, the final marker and provider errors", () =>
-  Effect.gen(function* () {
-    const audio = yield* parseElevenLabsFrame(
-      JSON.stringify({ audio: Buffer.from([1, 2, 3]).toString("base64"), isFinal: null }),
-    );
-    assert.deepEqual(audio, { type: "audio", pcm: new Uint8Array([1, 2, 3]) });
-    assert.deepEqual(yield* parseElevenLabsFrame(JSON.stringify({ audio: null, isFinal: true })), {
-      type: "final",
-    });
-    assert.deepEqual(yield* parseElevenLabsFrame(JSON.stringify({ alignment: {} })), {
-      type: "none",
-    });
-    const failure = yield* Effect.flip(
-      parseElevenLabsFrame(JSON.stringify({ error: "quota_exceeded", message: "No credits." })),
-    );
-    assert.equal(failure.reason, "provider");
-    const garbage = yield* Effect.flip(parseElevenLabsFrame("not json"));
-    assert.equal(garbage.reason, "protocol");
-  }),
-);
+it.effect("a refused key ends the audio with a configuration error", () => {
+  const elevenLabs = fakeElevenLabs(() => new Response("unauthorized", { status: 401 }));
+  return Effect.gen(function* () {
+    const session = yield* (yield* DiscussionSynth).open();
+    yield* session.say("Running the tests.");
+    const failure = yield* Effect.flip(Stream.runCollect(session.audio));
+    assert.equal(failure.reason, "not_configured");
+  }).pipe(Effect.scoped, withSynth(elevenLabs.client));
+});

@@ -25,6 +25,7 @@ import {
   resumesCutReply,
 } from "@t3tools/shared/discussion/callPhase";
 import {
+  captionText,
   startSpeechBeats,
   type SpeechBeats,
   stepSpeechBeats,
@@ -77,8 +78,13 @@ const APPROVAL_LINE = "I need your approval to continue.";
  * Model-facing framing for a spoken line. The agent answers in short spoken sentences and names
  * what it is about to do before a tool call, so the call is not silent while it works.
  */
-export const frameSpokenLine = (spoken: string) =>
-  `Spoken in a voice discussion. Answer in short spoken sentences, no markdown or code. Before you use a tool, say in one short sentence what you are about to do.\n\n${spoken}`;
+const SPOKEN_STYLE = `You are on a voice call with the user. Everything you write is spoken aloud and shown as captions.
+Talk the way a sharp colleague talks: short turns, one or two sentences, that react to what the user just said. Ask one question at a time when you need to.
+No stock phrases, no lists, no markdown, no code. Never read out file paths or code; say what they mean.
+Before you use a tool, say in one short sentence what you are about to do.
+Write a hesitation as "...". Put stress on a word in CAPITALS. Use an audio tag like [chuckles] or [thoughtful] rarely, only where a person would.`;
+
+export const frameSpokenLine = (spoken: string) => `${SPOKEN_STYLE}\n\nThe user said:\n${spoken}`;
 
 export class DiscussionEndError extends Schema.TaggedError<DiscussionEndError>()(
   "DiscussionEndError",
@@ -290,7 +296,9 @@ const make = Effect.gen(function* () {
     yield* playback.session.say(text).pipe(Effect.ignore);
     playback.said += 1;
     yield* publishPhase(call);
-    yield* send(call, { type: "caption", speaker: "agent", text, final: false });
+    const caption = captionText(text);
+    if (caption !== "")
+      yield* send(call, { type: "caption", speaker: "agent", text: caption, final: false });
   });
 
   const finishReply = (call: LiveCall) =>

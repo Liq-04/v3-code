@@ -2,6 +2,7 @@ import { MessageId, RunId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  captionText,
   emptySpeechBeats,
   type SpeechBeatsInput,
   startSpeechBeats,
@@ -152,5 +153,14 @@ describe("stepSpeechBeats", () => {
     ],
   ])("%s", (_name, inputs, beats) => {
     expect(run(inputs)).toEqual(beats);
+  });
+});
+
+describe("captionText", () => {
+  it("drops audio tags the voice performs and keeps the words", () => {
+    expect(captionText("[chuckles] Okay... I'll run it NOW. [thoughtful]")).toBe(
+      "Okay... I'll run it NOW.",
+    );
+    expect(captionText("[sighs]")).toBe("");
   });
 });
