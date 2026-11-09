@@ -19,6 +19,7 @@ import {
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
@@ -123,17 +124,26 @@ const makeSocket = Effect.gen(function* () {
   const closeError = new Socket.SocketError({
     reason: new Socket.SocketCloseError({ code: 1000 }),
   });
+  // Like a real upgrade: the handshake completes, and writes go out, only once reading starts.
+  const reading = yield* Deferred.make<void>();
   const socket = Socket.make({
-    reader: Effect.succeed({
-      pull: Queue.take(inbound).pipe(
-        Effect.map((frame) => [frame] as const),
-        Effect.mapError(() => closeError),
-      ),
-      upgrade: () => Effect.fail(closeError),
-    }),
+    reader: Deferred.succeed(reading, undefined).pipe(
+      Effect.as({
+        pull: Queue.take(inbound).pipe(
+          Effect.map((frame) => [frame] as const),
+          Effect.mapError(() => closeError),
+        ),
+        upgrade: () => Effect.fail(closeError),
+      }),
+    ),
     writer: Effect.succeed({
-      write: (chunk) => Queue.offer(outbound, chunk).pipe(Effect.asVoid),
-      writeAll: (chunks) => Queue.offerAll(outbound, chunks).pipe(Effect.asVoid),
+      write: (chunk) =>
+        Deferred.await(reading).pipe(Effect.andThen(Queue.offer(outbound, chunk)), Effect.asVoid),
+      writeAll: (chunks) =>
+        Deferred.await(reading).pipe(
+          Effect.andThen(Queue.offerAll(outbound, chunks)),
+          Effect.asVoid,
+        ),
     }),
   });
   const nextFrame = Queue.take(outbound).pipe(

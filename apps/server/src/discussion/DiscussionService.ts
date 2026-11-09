@@ -704,6 +704,8 @@ const make = Effect.gen(function* () {
       const writer = yield* socket.writer;
       const call = yield* findCall(discussionId);
       if (call === null) {
+        // The upgrade completes only once reading starts; a write before that never goes out.
+        yield* socket.reader;
         yield* writer
           .write(encodeServerFrame({ type: "ended", reason: "ended_by_user" }))
           .pipe(Effect.andThen(writer.write(new Socket.CloseEvent(1000))), Effect.ignore);
@@ -719,11 +721,12 @@ const make = Effect.gen(function* () {
         call.lostTimer = null;
       }
       const socketScope = yield* Scope.fork(call.scope);
+      // Reading starts before the first write, which would otherwise wait on the upgrade forever.
+      const reader = yield* socket.reader.pipe(Scope.provide(socketScope), Effect.exit);
       call.writer = writer;
       call.socketScope = socketScope;
       call.lastPhase = null;
       yield* publishPhase(call);
-      const reader = yield* socket.reader.pipe(Scope.provide(socketScope), Effect.exit);
       if (Exit.isSuccess(reader)) {
         yield* Effect.gen(function* () {
           while (true) {
