@@ -11,9 +11,10 @@ import { buildWorld, rectOf } from "./mapWorld";
 
 const A = "apps/web/ChatView.tsx";
 const B = "packages/contracts/git.ts";
+const C = "apps/web/index.css";
 const world = buildWorld(
   {
-    paths: [A, B, "apps/web/index.css"],
+    paths: [A, B, C],
     lines: [1600, 700, 1300],
     vendored: [false, false, false],
   },
@@ -53,6 +54,17 @@ const idle = { onHover: () => {}, onOpen: () => {} };
 const spriteOf = (container: HTMLElement, id: string) =>
   container.querySelector<HTMLElement>(`[data-testid="code-map-sprite"][data-thread-id="${id}"]`);
 const translateX = (el: HTMLElement) => Number(el.style.transform.match(/-?[\d.]+/)![0]);
+/** The file whose anchor the sprite is exactly on, or null while it travels between files. */
+const standingOn = (el: HTMLElement) => {
+  const [x, y] = [...el.style.transform.matchAll(/-?[\d.]+/g)].map(Number);
+  for (const file of world.files.values()) {
+    const anchorY = file.y + Math.min(file.h * 0.35, 12);
+    if (Math.abs(x! - (file.x + file.w / 2)) < 0.01 && Math.abs(y! - anchorY) < 0.01) {
+      return file.path;
+    }
+  }
+  return null;
+};
 
 it("spawns a subagent at its parent in the parent's colour, walks it to its file, and walks it home when it finishes", async () => {
   const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
@@ -152,4 +164,38 @@ it("stands a thread with no file at the dock and walks it off once a file names 
   expect(root.dataset.path).toBe(A);
   const target = rectOf(world, A)!;
   expect(translateX(root)).toBeGreaterThan(target.x);
+});
+
+it("stands on every file of a fast burst in order and lands on the last one soon after it", async () => {
+  const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
+  await using screen = await render(
+    <CodeMapSprites sprites={[agent(A)]} world={world} camera={camera} {...idle} />,
+  );
+  using _clock = fakeTimers();
+  const root = spriteOf(screen.container, "root")!;
+  const stood: string[] = [];
+  const said: string[] = [];
+  const watch = (ms: number) => {
+    for (let elapsed = 0; elapsed < ms; elapsed += 4) {
+      vi.advanceTimersByTime(4);
+      const path = standingOn(root);
+      if (path !== null && stood.at(-1) !== path) stood.push(path);
+      const text = root.querySelector('[data-testid="code-map-say"]')?.textContent;
+      if (text && said.at(-1) !== text) said.push(text);
+    }
+  };
+
+  for (const path of [B, C, A, B, C]) {
+    await screen.rerender(
+      <CodeMapSprites sprites={[agent(path)]} world={world} camera={camera} {...idle} />,
+    );
+    watch(100);
+  }
+  watch(500);
+
+  expect(stood).toEqual([A, B, C, A, B, C]);
+  expect(standingOn(root)).toBe(C);
+  expect(said).toEqual(["Edit ChatView.tsx", "Edit index.css"]);
+  expect(root.firstElementChild!.className).not.toContain("code-map-walk");
+  expect(vi.getTimerCount()).toBe(0);
 });
