@@ -143,6 +143,8 @@ export type CodeMapView =
       readonly files: ProjectCodeMapSnapshot["files"];
       /** Titles of every thread the map can show, whichever project owns it. */
       readonly threadTitles: ReadonlyMap<ThreadId, string>;
+      /** The name of the project each of those threads belongs to. */
+      readonly threadProjectNames: ReadonlyMap<ThreadId, string>;
       readonly model: CodeMap;
     };
 
@@ -154,6 +156,7 @@ interface CodeMapGroup {
   readonly baseKey: string;
   readonly chosenBaseRef: string | null;
   readonly projectRoots: ReadonlyMap<ProjectId, string>;
+  readonly projectTitles: ReadonlyMap<ProjectId, string>;
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
 }
 
@@ -168,6 +171,7 @@ function readGroup(get: Atom.AtomContext, ref: ScopedProjectRef): CodeMapGroup |
     baseKey,
     chosenBaseRef: get(codeMapBasesAtom)[baseKey] ?? null,
     projectRoots: new Map(group.map((project) => [project.id, project.workspaceRoot])),
+    projectTitles: new Map(group.map((project) => [project.id, project.title])),
     threads: get(
       environmentThreadShells.threadShellsForProjectRefsAtom(
         group.map((project) => scopeProjectRef(ref.environmentId, project.id)),
@@ -265,11 +269,18 @@ const codeMapViewFamily = Atom.family((key: string) => {
       chosenBaseRef,
       files: snapshot.files,
       threadTitles: new Map(group.threads.map((thread) => [thread.id, thread.title])),
+      threadProjectNames: new Map(
+        group.threads.flatMap((thread) => {
+          const name = group.projectTitles.get(thread.projectId);
+          return name === undefined ? [] : [[thread.id, name] as const];
+        }),
+      ),
       model: deriveCodeMap({
         snapshot,
         threads: group.threads,
         changesByRoot: readChangesByRoot(get, ref.environmentId, group),
         projectRoots: group.projectRoots,
+        now: new Date().toISOString(),
         backfilledReads,
         observedReads,
       }),

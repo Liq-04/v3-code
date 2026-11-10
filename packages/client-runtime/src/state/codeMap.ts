@@ -16,6 +16,7 @@ import * as DateTime from "effect/DateTime";
 
 import { threadRuntimeIsActive, type EnvironmentThreadShell } from "./models.ts";
 import { isThreadWorking } from "./threadInbox.ts";
+import { effectiveSnoozed } from "./threadSettled.ts";
 
 export interface CodeMapChange {
   readonly path: string;
@@ -67,6 +68,8 @@ export interface CodeMapSprite {
   /** Null means the latest touch named no path inside a checkout: keep the sprite where it was. */
   readonly path: string | null;
   readonly op: "read" | "edit" | null;
+  /** Waiting is on the user: an approval, a question, or a plan to accept. Subagents only work. */
+  readonly state: "working" | "waiting" | "idle";
 }
 
 export interface CodeMapRead {
@@ -103,8 +106,13 @@ export type CodeMapThreadInput = Pick<
   | "hasActionableProposedPlan"
   | "hasPendingApprovals"
   | "hasPendingUserInput"
+  | "pendingUserInputAt"
   | "pendingSubagentRequest"
+  | "pendingGuestMessageCount"
   | "interactionMode"
+  | "settledOverride"
+  | "snoozedUntil"
+  | "snoozedAt"
   | "latestRun"
   | "runtime"
   | "lineage"
@@ -119,6 +127,9 @@ export type CodeMapThreadInput = Pick<
     | "pendingBackgroundTasks"
   >;
 };
+
+const isLiveThread = (thread: CodeMapThreadInput) =>
+  thread.archivedAt === null && thread.deletedAt === null;
 
 const isSubagent = (thread: CodeMapThreadInput) =>
   thread.lineage.relationshipToParent === "subagent";
@@ -138,6 +149,8 @@ export interface DeriveCodeMapInput {
   readonly changesByRoot: ReadonlyMap<string, CodeMapCheckoutChanges>;
   /** Where each project's threads run when they have no worktree. Other projects' threads are skipped. */
   readonly projectRoots: ReadonlyMap<ProjectId, string>;
+  /** The ISO time snoozes are judged against. */
+  readonly now: string;
   /** Absolute paths the server lists for each thread's current run. */
   readonly backfilledReads: ReadonlyMap<ThreadId, ReadonlyArray<string>>;
   readonly observedReads: ReadonlyMap<ThreadId, CodeMapReadTrail>;
@@ -220,12 +233,53 @@ function parentOf(path: string): string {
 
 type MarkSetsInput = Pick<DeriveCodeMapInput, "threads" | "changesByRoot" | "projectRoots">;
 
-/** A working thread or subagent: what draws a sprite and leaves a read trail. */
+/** A thread or live subagent that draws a sprite. A working one also leaves a read trail. */
 interface CodeMapActor {
   readonly thread: CodeMapThreadInput;
   readonly kind: CodeMapSprite["kind"];
   readonly parentThreadId: ThreadId | null;
   readonly colorThreadId: ThreadId;
+  readonly state: CodeMapSprite["state"];
+}
+
+/** Null for a parked thread: settled or snoozed, the sidebar's rule. A working one is never parked. */
+function spriteStateOf(thread: CodeMapThreadInput, now: string): CodeMapSprite["state"] | null {
+  if (isThreadWorking(thread)) return "working";
+  if (thread.settledOverride === "settled" || effectiveSnoozed(thread, { now })) return null;
+  const waiting =
+    thread.hasPendingApprovals ||
+    thread.hasPendingUserInput ||
+    thread.pendingSubagentRequest != null ||
+    (thread.interactionMode === "plan" && thread.hasActionableProposedPlan);
+  return waiting ? "waiting" : "idle";
+}
+
+function collectActors(
+  input: Pick<DeriveCodeMapInput, "threads" | "projectRoots" | "now">,
+): ReadonlyArray<CodeMapActor> {
+  const liveIds = new Set(input.threads.filter(isLiveThread).map((thread) => thread.id));
+  const actors: CodeMapActor[] = [];
+  for (const thread of input.threads) {
+    if (!liveIds.has(thread.id)) continue;
+    if (isSubagent(thread)) {
+      const rootId = thread.lineage.rootThreadId;
+      if (isActorWorking(thread) && liveIds.has(rootId)) {
+        actors.push({
+          thread,
+          kind: "subagent",
+          parentThreadId: rootId,
+          colorThreadId: rootId,
+          state: "working",
+        });
+      }
+      continue;
+    }
+    if (thread.worktreePath === null && !input.projectRoots.has(thread.projectId)) continue;
+    const state = spriteStateOf(thread, input.now);
+    if (state === null) continue;
+    actors.push({ thread, kind: "agent", parentThreadId: null, colorThreadId: thread.id, state });
+  }
+  return actors;
 }
 
 function collectMarkSets(input: MarkSetsInput) {
@@ -237,20 +291,8 @@ function collectMarkSets(input: MarkSetsInput) {
     string,
     { readonly threadIds: ThreadId[]; readonly files: ReadonlyArray<CodeMapChange> }
   >();
-  const actors: CodeMapActor[] = [];
-  const liveIds = new Set<ThreadId>();
   for (const thread of input.threads) {
-    if (thread.archivedAt === null && thread.deletedAt === null) liveIds.add(thread.id);
-  }
-  for (const thread of input.threads) {
-    if (!liveIds.has(thread.id)) continue;
-    if (isSubagent(thread)) {
-      const rootId = thread.lineage.rootThreadId;
-      if (isActorWorking(thread) && liveIds.has(rootId)) {
-        actors.push({ thread, kind: "subagent", parentThreadId: rootId, colorThreadId: rootId });
-      }
-      continue;
-    }
+    if (!isLiveThread(thread) || isSubagent(thread)) continue;
     const threadRoot = thread.worktreePath ?? input.projectRoots.get(thread.projectId);
     if (threadRoot === undefined) continue;
     const changes = changesByRoot.get(normalizeRoot(threadRoot));
@@ -267,9 +309,6 @@ function collectMarkSets(input: MarkSetsInput) {
     const checkout = checkouts.get(root);
     if (checkout) checkout.threadIds.push(thread.id);
     else checkouts.set(root, { threadIds: [thread.id], files });
-    if (running) {
-      actors.push({ thread, kind: "agent", parentThreadId: null, colorThreadId: thread.id });
-    }
   }
 
   const setsByPath = new Map<string, CodeMapMarkSet[]>();
@@ -282,11 +321,8 @@ function collectMarkSets(input: MarkSetsInput) {
     }
   }
 
-  return { threads, actors, setsByPath };
+  return { threads, setsByPath };
 }
-
-const isLiveThread = (thread: CodeMapThreadInput) =>
-  thread.archivedAt === null && thread.deletedAt === null;
 
 /**
  * Folds each working thread's latest read into its run's trail and drops the trails of threads
@@ -345,7 +381,7 @@ export function deriveCodeMap(input: DeriveCodeMapInput): CodeMap {
   const listed = new Map<string, number>();
   snapshot.files.paths.forEach((path, i) => listed.set(path, snapshot.files.lines[i] ?? 0));
 
-  const { threads, actors, setsByPath } = collectMarkSets(input);
+  const { threads, setsByPath } = collectMarkSets(input);
 
   // Only checkout roots: a project folder can be a subfolder, and map paths are repository-relative.
   const roots = new Set<string>(snapshot.checkouts);
@@ -355,16 +391,21 @@ export function deriveCodeMap(input: DeriveCodeMapInput): CodeMap {
   }
   const sprites: CodeMapSprite[] = [];
   const readers = new Map<string, ThreadId[]>();
-  for (const { thread, kind, parentThreadId, colorThreadId } of actors) {
+  for (const { thread, kind, parentThreadId, colorThreadId, state } of collectActors(input)) {
     const active = thread.source.activeFile;
+    const path = active ? checkoutRelativePath(active.path, roots) : null;
+    // A thread that stopped has nowhere to stand until a file of the map names its place.
+    if (state !== "working" && path === null) continue;
     sprites.push({
       threadId: thread.id,
       kind,
       parentThreadId,
       colorThreadId,
-      path: active ? checkoutRelativePath(active.path, roots) : null,
+      path,
       op: active?.op ?? null,
+      state,
     });
+    if (state !== "working") continue;
     const observed = input.observedReads.get(thread.id);
     const trail = [
       ...(input.backfilledReads.get(thread.id) ?? []),

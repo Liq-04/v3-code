@@ -90,6 +90,9 @@ function thread(
     hasPendingApprovals: false,
     hasPendingUserInput: false,
     interactionMode: "default",
+    settledOverride: null,
+    snoozedUntil: null,
+    snoozedAt: null,
     latestRun: null,
     runtime: {
       status: opts.running ? "running" : opts.finished ? "completed" : "idle",
@@ -128,6 +131,7 @@ function view(
       Object.entries(changes).map(([root, files]) => [root, { checkout: root, files }]),
     ),
     projectRoots: new Map([[PROJECT_ID, PROJECT]]),
+    now: "2026-06-01T12:00:00.000Z",
     backfilledReads: new Map(
       Object.entries(reads).map(([id, paths]) => [ThreadId.make(id), paths]),
     ),
@@ -145,6 +149,7 @@ function view(
       [ThreadId.make("a"), "Code map"],
       [ThreadId.make("b"), "Checkpoint diff stalls"],
     ]),
+    threadProjectNames: new Map([[ThreadId.make("b"), "T3 Code"]]),
     model,
   };
 }

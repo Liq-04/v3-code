@@ -73,6 +73,9 @@ function thread(
     run?: string;
     /** A provider-native subagent: no T3 runtime or run, live only through its shell status. */
     native?: boolean;
+    settled?: boolean;
+    snoozedUntil?: string;
+    waiting?: boolean;
     active?: { path: string; op: "read" | "edit"; at?: string };
   } = {},
 ): CodeMapThreadInput {
@@ -96,8 +99,11 @@ function thread(
     },
     hasActionableProposedPlan: false,
     hasPendingApprovals: false,
-    hasPendingUserInput: false,
+    hasPendingUserInput: opts.waiting ?? false,
     interactionMode: "default",
+    settledOverride: opts.settled ? "settled" : null,
+    snoozedUntil: opts.snoozedUntil ?? null,
+    snoozedAt: null,
     latestRun: null,
     runtime: status
       ? {
@@ -153,6 +159,7 @@ function derive(
     threads,
     changesByRoot: changesByRoot(changes, checkouts),
     projectRoots: PROJECT_ROOTS,
+    now: "2026-06-01T12:00:00.000Z",
     backfilledReads: new Map(),
     observedReads: new Map(),
     ...reads,
@@ -193,6 +200,7 @@ describe("deriveCodeMap", () => {
         colorThreadId: "a",
         path: ORCH,
         op: "edit",
+        state: "working",
       },
     ]);
   });
@@ -278,6 +286,29 @@ describe("deriveCodeMap", () => {
     expect(model.sprites).toEqual([]);
   });
 
+  it("stands every unsettled thread at its last file and tells working, waiting and idle apart", () => {
+    const active = (id: string) => ({ path: `/wt/${id}/${ORCH}`, op: "edit" as const });
+    const model = derive(
+      [
+        thread("idle", { worktree: "/wt/idle", active: active("idle") }),
+        thread("asks", { worktree: "/wt/asks", waiting: true, active: active("asks") }),
+        thread("done", { worktree: "/wt/done", settled: true, active: active("done") }),
+        thread("later", {
+          worktree: "/wt/later",
+          snoozedUntil: "2026-06-02T00:00:00.000Z",
+          active: active("later"),
+        }),
+        thread("nowhere", { worktree: "/wt/nowhere" }),
+      ],
+      {},
+    );
+    expect(model.sprites.map((sprite) => [sprite.threadId, sprite.state, sprite.path])).toEqual([
+      ["idle", "idle", ORCH],
+      ["asks", "waiting", ORCH],
+    ]);
+    expect(model.threads).toEqual([]);
+  });
+
   it("gives a running thread whose activeFile is absent a sprite with no new position", () => {
     const model = derive([thread("a", { worktree: "/wt/a", running: true })], {});
     expect(model.sprites).toEqual([
@@ -288,6 +319,7 @@ describe("deriveCodeMap", () => {
         colorThreadId: "a",
         path: null,
         op: null,
+        state: "working",
       },
     ]);
   });
@@ -513,6 +545,7 @@ describe("subagents", () => {
           colorThreadId: "a",
           path: ORCH,
           op: "read",
+          state: "working",
         },
       ],
     },
@@ -539,6 +572,7 @@ describe("subagents", () => {
           colorThreadId: "a",
           path: null,
           op: null,
+          state: "working",
         },
         {
           threadId: "t",
@@ -547,6 +581,7 @@ describe("subagents", () => {
           colorThreadId: "a",
           path: null,
           op: null,
+          state: "working",
         },
       ],
     },
