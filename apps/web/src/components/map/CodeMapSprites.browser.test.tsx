@@ -88,6 +88,7 @@ it("spawns a subagent at its parent in the parent's colour, walks it to its file
   expect(translateX(sub)).toBeGreaterThan(target.x);
   expect(translateX(sub)).toBeLessThan(target.x + target.w);
   expect(sub.querySelector('[data-testid="code-map-say"]')).toHaveTextContent("Read git.ts");
+  // The working sprite's beat predates the fake clock, so this counts walk frames only.
   expect(vi.getTimerCount()).toBe(0);
 
   await screen.rerender(
@@ -99,6 +100,7 @@ it("spawns a subagent at its parent in the parent's colour, walks it to its file
   expect(sub.style.opacity).toBe("0");
   vi.advanceTimersByTime(400);
   expect(spriteOf(screen.container, "sub")).toBeNull();
+  // The working sprite's beat predates the fake clock, so this counts walk frames only.
   expect(vi.getTimerCount()).toBe(0);
 });
 
