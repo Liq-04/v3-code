@@ -8,6 +8,8 @@ import type { World } from "./mapWorld";
 export interface SpriteInput {
   readonly threadId: ThreadId;
   readonly path: string | null;
+  /** Where a sprite with no position yet stands until a path names its place. */
+  readonly home: string | null;
   readonly verb: string | null;
   readonly kind: "agent" | "subagent";
   readonly parentThreadId: ThreadId | null;
@@ -346,6 +348,13 @@ function createSpriteLayer() {
             walker.worldPos = to;
             if (speak) say(walker, text);
           }
+        }
+      }
+      if (walker.targetPath === null && input.home !== null) {
+        const to = anchor(walker, input.home);
+        if (to) {
+          walker.targetPath = input.home;
+          walker.worldPos = to;
         }
       }
       apply(walker, input);

@@ -199,6 +199,7 @@ describe("deriveCodeMap", () => {
         parentThreadId: null,
         colorThreadId: "a",
         path: ORCH,
+        home: ORCH,
         op: "edit",
         state: "working",
       },
@@ -275,7 +276,7 @@ describe("deriveCodeMap", () => {
     expect(model.marks.map((m) => m.isNew)).toEqual([false, false]);
   });
 
-  it("keeps a finished thread's marks and gives it no sprite", () => {
+  it("keeps a finished thread's marks and stands it idle on its change", () => {
     const model = derive([thread("a", { worktree: "/wt/a", finished: true })], {
       "/wt/a": [change(ORCH)],
     });
@@ -283,7 +284,9 @@ describe("deriveCodeMap", () => {
       { threadId: "a", root: "/wt/a", running: false, finished: true },
     ]);
     expect(model.marks).toHaveLength(1);
-    expect(model.sprites).toEqual([]);
+    expect(
+      model.sprites.map((sprite) => [sprite.threadId, sprite.state, sprite.path, sprite.home]),
+    ).toEqual([["a", "idle", null, ORCH]]);
   });
 
   it("stands every unsettled thread at its last file and tells working, waiting and idle apart", () => {
@@ -309,6 +312,21 @@ describe("deriveCodeMap", () => {
     expect(model.threads).toEqual([]);
   });
 
+  it("stands a thread whose last file is outside every checkout on its busiest change", () => {
+    const model = derive(
+      [
+        thread("elsewhere", {
+          worktree: "/wt/elsewhere",
+          active: { path: "/tmp/scratch/page.html", op: "edit" },
+        }),
+      ],
+      { "/wt/elsewhere": [change(ORCH, 3, 1), change("apps/web/src/App.tsx", 40, 2)] },
+    );
+    expect(
+      model.sprites.map((sprite) => [sprite.threadId, sprite.state, sprite.path, sprite.home]),
+    ).toEqual([["elsewhere", "idle", null, "apps/web/src/App.tsx"]]);
+  });
+
   it("gives a running thread whose activeFile is absent a sprite with no new position", () => {
     const model = derive([thread("a", { worktree: "/wt/a", running: true })], {});
     expect(model.sprites).toEqual([
@@ -318,6 +336,7 @@ describe("deriveCodeMap", () => {
         parentThreadId: null,
         colorThreadId: "a",
         path: null,
+        home: null,
         op: null,
         state: "working",
       },
@@ -544,6 +563,7 @@ describe("subagents", () => {
           parentThreadId: "a",
           colorThreadId: "a",
           path: ORCH,
+          home: null,
           op: "read",
           state: "working",
         },
@@ -571,6 +591,7 @@ describe("subagents", () => {
           parentThreadId: "a",
           colorThreadId: "a",
           path: null,
+          home: null,
           op: null,
           state: "working",
         },
@@ -580,6 +601,7 @@ describe("subagents", () => {
           parentThreadId: "a",
           colorThreadId: "a",
           path: null,
+          home: null,
           op: null,
           state: "working",
         },

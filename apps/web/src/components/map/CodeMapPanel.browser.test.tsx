@@ -270,7 +270,7 @@ it("paints marked files over the background", async () => {
   await vi.waitFor(() => expect(fill(INDEX_CSS)).not.toBe(fill(GIT)));
 });
 
-it("draws a sprite for each running thread and none for a finished one", async () => {
+it("draws a working sprite for a running thread and an idle one for a finished one", async () => {
   using context = setup(
     view([thread("a", { running: true, active: CHAT_VIEW }), thread("b", { finished: true })], {
       "/wt/a": [change(CHAT_VIEW)],
@@ -278,8 +278,10 @@ it("draws a sprite for each running thread and none for a finished one", async (
     }),
   );
   await using screen = await render(context.ui, { container: context.container });
-  expect(screen.container.querySelectorAll('[data-testid="code-map-sprite"]')).toHaveLength(1);
+  expect(screen.container.querySelectorAll('[data-testid="code-map-sprite"]')).toHaveLength(2);
   expect(sprite(screen, "a")!.dataset.path).toBe(CHAT_VIEW);
+  expect(sprite(screen, "b")!.dataset.state).toBe("idle");
+  expect(sprite(screen, "b")!.dataset.path).toBe(GIT);
   expect(cell(screen, GIT).dataset.strength).toBe("faint");
 });
 

@@ -128,6 +128,7 @@ function toSpriteInput(
   return {
     threadId: sprite.threadId,
     path: sprite.path,
+    home: sprite.home,
     verb: verbOf(sprite.op),
     kind: sprite.kind,
     parentThreadId: sprite.parentThreadId,

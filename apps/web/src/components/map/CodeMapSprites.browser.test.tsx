@@ -24,6 +24,7 @@ const world = buildWorld(
 const agent = (path: string | null): SpriteInput => ({
   threadId: ThreadId.make("root"),
   path,
+  home: null,
   verb: "Edit",
   kind: "agent",
   parentThreadId: null,
@@ -36,6 +37,7 @@ const agent = (path: string | null): SpriteInput => ({
 const subagent = (path: string | null): SpriteInput => ({
   threadId: ThreadId.make("sub"),
   path,
+  home: null,
   verb: "Read",
   kind: "subagent",
   parentThreadId: ThreadId.make("root"),

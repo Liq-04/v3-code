@@ -67,6 +67,8 @@ export interface CodeMapSprite {
   readonly colorThreadId: ThreadId;
   /** Null means the latest touch named no path inside a checkout: keep the sprite where it was. */
   readonly path: string | null;
+  /** Where a sprite with no position yet stands: its thread's busiest listed change. */
+  readonly home: string | null;
   readonly op: "read" | "edit" | null;
   /** Waiting is on the user: an approval, a question, or a plan to accept. Subagents only work. */
   readonly state: "working" | "waiting" | "idle";
@@ -389,19 +391,32 @@ export function deriveCodeMap(input: DeriveCodeMapInput): CodeMap {
   for (const thread of input.threads) {
     if (thread.worktreePath !== null) roots.add(thread.worktreePath);
   }
+  // Where a sprite stands before any file of the map names its place.
+  const busiest = new Map<ThreadId, { readonly path: string; readonly size: number }>();
+  for (const [path, sets] of setsByPath) {
+    if (!listed.has(path)) continue;
+    for (const set of sets) {
+      const size = set.insertions + set.deletions;
+      for (const threadId of set.threadIds) {
+        if ((busiest.get(threadId)?.size ?? -1) < size) busiest.set(threadId, { path, size });
+      }
+    }
+  }
   const sprites: CodeMapSprite[] = [];
   const readers = new Map<string, ThreadId[]>();
   for (const { thread, kind, parentThreadId, colorThreadId, state } of collectActors(input)) {
     const active = thread.source.activeFile;
     const path = active ? checkoutRelativePath(active.path, roots) : null;
+    const home = busiest.get(thread.id)?.path ?? null;
     // A thread that stopped has nowhere to stand until a file of the map names its place.
-    if (state !== "working" && path === null) continue;
+    if (state !== "working" && path === null && home === null) continue;
     sprites.push({
       threadId: thread.id,
       kind,
       parentThreadId,
       colorThreadId,
       path,
+      home,
       op: active?.op ?? null,
       state,
     });
