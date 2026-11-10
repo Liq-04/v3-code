@@ -20,7 +20,8 @@ export interface SpriteInput {
   readonly idleSince: number | null;
 }
 
-type Mood = Exclude<CodeMapSprite["state"], "idle"> | "awake" | "asleep";
+/** A sprite whose turn just ended is awake for a while; idle is asleep. */
+type Mood = CodeMapSprite["state"] | "awake";
 
 export interface SpriteHover {
   readonly threadId: ThreadId;
@@ -75,9 +76,8 @@ interface Walker {
   mood: Mood;
   /** Offsets this walker's blinks and taps on the shared beat so sprites do not move in step. */
   readonly phase: number;
-  /** The beat on which the walker entered its mood. */
-  moodBeat: number;
-  strollBeat: number;
+  /** The beat its mood counts from: waiting hops every so often after it, awake strolls once it comes. */
+  cueBeat: number;
   /** Off its place on a stroll, until a leg takes it somewhere it belongs. */
   strayed: boolean;
   leaving: boolean;
@@ -120,8 +120,10 @@ const samePlace = (a: CodeMapPlace | null, b: CodeMapPlace) =>
 
 const moodOf = (input: SpriteInput, now: number): Mood => {
   if (input.state !== "idle") return input.state;
-  return input.idleSince !== null && now - input.idleSince < AWAKE_MS ? "awake" : "asleep";
+  return input.idleSince !== null && now - input.idleSince < AWAKE_MS ? "awake" : "idle";
 };
+
+const movesOnBeat = (walker: Walker) => !walker.leaving && walker.mood !== "idle";
 
 const between = (min: number, max: number) => min + Math.random() * (max - min);
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -328,8 +330,8 @@ function createSpriteLayer() {
       });
     }
     if (mood === "working" && own % TAP_EVERY_BEATS === 0 && !walker.leg) tap(walker);
-    if (mood === "waiting" && (beat - walker.moodBeat) % HOP_EVERY_BEATS === 0) hop(walker);
-    if (mood === "awake" && beat >= walker.strollBeat) stroll(walker);
+    if (mood === "waiting" && (beat - walker.cueBeat) % HOP_EVERY_BEATS === 0) hop(walker);
+    if (mood === "awake" && beat >= walker.cueBeat) stroll(walker);
     if (own % BLINK_EVERY_BEATS === 0) blink(walker);
   };
 
@@ -344,17 +346,14 @@ function createSpriteLayer() {
         delete walker.el.dataset.busy;
       }
       refreshMood(walker, wallNow);
-      if (!still && !walker.leaving && walker.mood !== "asleep") act(walker);
+      if (!still && movesOnBeat(walker)) act(walker);
     }
     syncBeat();
   };
 
   /** The beat runs only while some sprite is in a mood that moves on it. */
   const syncBeat = () => {
-    let needed = false;
-    for (const walker of walkers.values()) {
-      needed ||= !walker.leaving && walker.mood !== "asleep";
-    }
+    const needed = [...walkers.values()].some(movesOnBeat);
     if (needed && beatTimer === null) {
       beatTimer = setInterval(onBeat, BEAT_MS);
     } else if (!needed && beatTimer !== null) {
@@ -391,7 +390,7 @@ function createSpriteLayer() {
       return;
     }
     look(walker, 0, 0);
-    if (walker.mood !== "asleep") blink(walker);
+    if (walker.mood !== "idle") blink(walker);
     void walker.body.offsetWidth;
     walker.body.classList.add("code-map-land");
     leg.onArrive?.();
@@ -531,7 +530,7 @@ function createSpriteLayer() {
 
   /** Ambles to a point near the walker's place, so a stroll never carries it off its file. */
   const stroll = (walker: Walker) => {
-    walker.strollBeat = nextStrollBeat();
+    walker.cueBeat = nextStrollBeat();
     const from = walker.worldPos;
     const home = walker.place && anchor(walker, walker.place);
     if (!world || !camera || !from || !home || walker.leg || hover?.walker === walker) return;
@@ -572,17 +571,16 @@ function createSpriteLayer() {
     fades.add(timer);
   };
 
-  // index.css draws each mood's eyes and cloud from these attributes. Asleep paints as idle.
+  // index.css draws each mood's eyes and cloud from these attributes.
   const setMood = (walker: Walker, mood: Mood) => {
     const { el, body } = walker;
     if (walker.mood === "awake") recall(walker);
     const finished = walker.mood === "working" || walker.mood === "thinking";
     walker.mood = mood;
-    el.dataset.state = mood === "asleep" ? "idle" : mood;
+    el.dataset.state = mood;
     el.toggleAttribute("data-done", finished && walker.input.state === "idle");
-    walker.moodBeat = beat;
-    if (mood === "awake") walker.strollBeat = nextStrollBeat();
-    body.classList.toggle("opacity-70", mood === "asleep");
+    walker.cueBeat = mood === "awake" ? nextStrollBeat() : beat;
+    body.classList.toggle("opacity-70", mood === "idle");
     body.querySelector("[data-testid=code-map-waiting]")?.remove();
     if (mood !== "waiting") return;
     const badge = document.createElement("span");
@@ -633,10 +631,9 @@ function createSpriteLayer() {
       paceMs: null,
       pathChangedAt: null,
       pose: null,
-      mood: "asleep",
+      mood: "idle",
       phase: spawned++,
-      moodBeat: beat,
-      strollBeat: beat,
+      cueBeat: beat,
       strayed: false,
       leaving: false,
     };
