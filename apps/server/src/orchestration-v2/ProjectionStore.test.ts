@@ -1410,6 +1410,8 @@ it.effect("shells name the file the latest tool touched by its absolute path", (
       streaming: true,
     });
     yield* expectToolRunning(worktreeThreadId, false);
+    yield* updateItem({ ...itemOn(worktreeThreadId, 5), runId: null, type: "web_search" });
+    yield* expectToolRunning(worktreeThreadId, false);
     yield* updateItem({ ...itemOn(worktreeThreadId, 4), type: "web_search" });
     yield* expectToolRunning(worktreeThreadId, true);
     yield* store.apply({

@@ -260,7 +260,8 @@ interface CodeMapActor {
   readonly state: CodeMapSprite["state"];
 }
 
-// An older server names no tool state, which reads as working.
+// Thinking needs a run in flight and a server that says no tool runs. A thread that works with
+// no run, and an older server that names no tool state, both read as working.
 const busyStateOf = (thread: CodeMapThreadInput) =>
   thread.source.activeRunId !== null && thread.source.toolRunning === false
     ? "thinking"

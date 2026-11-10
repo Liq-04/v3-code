@@ -1741,12 +1741,12 @@ export function threadShellFromProjection(
     ),
     pendingBackgroundTasks: [...pendingBackgroundTasks],
     ...(activeFile === undefined ? {} : { activeFile }),
-    // A provider-native subagent's items belong to no run.
     toolRunning: projection.turnItems.some(
       (item) =>
         isToolTurnItem(item) &&
         isOrchestrationV2WorkActive(item.status) &&
-        (item.runId === null || liveRunIds.has(item.runId)),
+        item.runId !== null &&
+        liveRunIds.has(item.runId),
     ),
     providerInstanceHistory: providerInstanceHistoryForShell({
       threadId: projection.thread.id,
@@ -6398,14 +6398,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 WHERE tool.thread_id = t.thread_id
                   AND tool.status IN ('pending', 'running', 'waiting')
                   AND tool.type IN ${sql.in(TOOL_TURN_ITEM_TYPES)}
-                  AND (
-                    tool.run_id IS NULL
-                    OR EXISTS (
-                      SELECT 1 FROM orchestration_v2_projection_runs r
-                      WHERE r.run_id = tool.run_id
-                        AND r.status IN ('preparing', 'starting', 'running', 'waiting')
-                        AND NOT ${isSilentShellRun("r")}
-                    )
+                  AND EXISTS (
+                    SELECT 1 FROM orchestration_v2_projection_runs r
+                    WHERE r.run_id = tool.run_id
+                      AND r.status IN ('preparing', 'starting', 'running', 'waiting')
+                      AND NOT ${isSilentShellRun("r")}
                   )
               ) AS tool_running,
               (
