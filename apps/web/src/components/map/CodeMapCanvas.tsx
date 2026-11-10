@@ -1,3 +1,4 @@
+import * as Schema from "effect/Schema";
 import { threadColor, type CodeMapPathMark } from "@t3tools/client-runtime/state/code-map";
 import type { ThreadId } from "@t3tools/contracts";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
@@ -16,7 +17,8 @@ import {
 } from "./mapCamera";
 import { hitTest, type World, type WorldFile, type WorldFolder, type WorldNode } from "./mapWorld";
 
-export type MapScope = "thread" | "all";
+export const MapScope = Schema.Literals(["thread", "all"]);
+export type MapScope = typeof MapScope.Type;
 
 export interface MarkView {
   readonly path: string;

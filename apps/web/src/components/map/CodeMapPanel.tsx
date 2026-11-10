@@ -18,6 +18,7 @@ import {
 import { Spinner } from "~/components/ui/spinner";
 import { Toggle } from "~/components/ui/toggle";
 import { Toggle as ScopeToggle, ToggleGroup } from "~/components/ui/toggle-group";
+import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { observeResize } from "~/lib/observeResize";
 import { projectIconColorValue } from "~/projectIconColors";
 import { useRightPanelStore } from "~/rightPanelStore";
@@ -31,7 +32,7 @@ import { useProject, useThreadShell } from "~/state/entities";
 import { buildThreadRouteParams } from "~/threadRoutes";
 
 import { CodeMapBasePicker } from "./CodeMapBasePicker";
-import { CodeMapCanvas, markView, type MapScope } from "./CodeMapCanvas";
+import { CodeMapCanvas, MapScope, markView } from "./CodeMapCanvas";
 import { CodeMapSpriteCard, spriteStatus, threadChanges } from "./CodeMapSpriteCard";
 import { CodeMapSprites, type SpriteHover, type SpriteInput } from "./CodeMapSprites";
 import {
@@ -44,6 +45,7 @@ import { buildWorldTree, layoutWorld, rectOf, type World, type WorldTree } from 
 
 type ReadyView = Extract<CodeMapView, { status: "ready" }>;
 
+const MAP_SCOPE_STORAGE_KEY = "t3code:code-map-scope:v1";
 const LOADING_VIEW = Atom.make<CodeMapView>({ status: "loading" });
 const NO_SIZE: Size = { width: 0, height: 0 };
 const NO_PATHS: ReadonlyMap<ThreadId, string> = new Map();
@@ -167,7 +169,7 @@ function CodeMapStage(props: {
   const project = useProject(props.projectRef);
   const selectedPath = useSelectedCodeMapPath(threadRef);
   const hoveredPath = useCodeMapFocusStore((state) => state.hoveredPath);
-  const [scope, setScope] = useState<MapScope>("thread");
+  const [scope, setScope] = useLocalStorage(MAP_SCOPE_STORAGE_KEY, "thread", MapScope);
   const [follow, setFollow] = useState(false);
   const [camera] = useState(() => createCameraStore(HOME_CAMERA));
   const [box, setBox] = useState(NO_SIZE);

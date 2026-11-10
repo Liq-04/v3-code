@@ -171,6 +171,7 @@ const twoThreads = () =>
 function setup(initial: CodeMapView) {
   useRightPanelStore.setState({ byThreadKey: {} });
   useCodeMapFocusStore.setState({ selected: null, hoveredPath: null });
+  localStorage.removeItem("t3code:code-map-scope:v1");
   state.view = Atom.make(initial);
   const registry = AtomRegistry.make();
   const container = document.createElement("div");
@@ -229,7 +230,7 @@ it("opens the other thread for a file only it changed", async () => {
   expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, ref)).toBeNull();
 });
 
-it("fades the other thread until the scope switches to All", async () => {
+it("fades the other thread until the scope switches to All, and a reopened map keeps All", async () => {
   using context = setup(twoThreads());
   await using screen = await render(context.ui, { container: context.container });
   expect(cell(screen, GIT).dataset.strength).toBe("faint");
@@ -245,6 +246,16 @@ it("fades the other thread until the scope switches to All", async () => {
   await userEvent.click(screen.getByRole("button", { name: "All" }));
   await expect.poll(() => cell(screen, GIT).dataset.strength).toBe("strong");
   expect(sprite(screen, "b")!.className).not.toContain("opacity-50");
+
+  const container = document.createElement("div");
+  container.style.cssText = context.container.style.cssText;
+  await using reopened = await render(
+    <RegistryContext.Provider value={context.registry}>
+      <CodeMapPanel threadRef={ref} />
+    </RegistryContext.Provider>,
+    { container },
+  );
+  await expect.poll(() => cell(reopened, GIT).dataset.strength).toBe("strong");
 });
 
 it("paints marked files over the background", async () => {
