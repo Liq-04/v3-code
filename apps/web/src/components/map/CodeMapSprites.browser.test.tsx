@@ -295,11 +295,12 @@ const stopAnimations = (...elements: ReadonlyArray<Element>) => {
 const terminalOf = (sprite: HTMLElement) =>
   sprite.querySelector<HTMLElement>('[data-testid="code-map-terminal"]')!;
 const linesOf = (terminal: HTMLElement) =>
-  [...terminal.querySelectorAll("i")].map((line) => line.offsetTop).join();
+  [...terminal.querySelectorAll<HTMLElement>(".code-map-terminal-line")]
+    .map((line) => line.offsetTop)
+    .join();
 
 it("moves a sprite straight onto its file and shows its terminal without printing when motion is reduced", async () => {
   const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
-  // Mounted idle so the shared beat starts under the fake clock.
   await using screen = await render(
     <CodeMapSprites sprites={[inState("idle")]} world={world} camera={camera} {...idle} />,
   );
@@ -318,7 +319,7 @@ it("moves a sprite straight onto its file and shows its terminal without printin
   const printed = linesOf(terminal);
   vi.advanceTimersByTime(6000);
   expect(linesOf(terminal)).toBe(printed);
-  expect(getComputedStyle(terminal.querySelector("b")!).opacity).toBe("1");
+  expect(getComputedStyle(terminal.querySelector(".code-map-terminal-cursor")!).opacity).toBe("1");
   expect(root.firstElementChild!.getAnimations()).toHaveLength(0);
 });
 
@@ -332,7 +333,7 @@ it("steps a thinking sprite's cloud and prints on a working one's terminal on a 
   const body = root.firstElementChild!;
   const cloud = root.querySelector('[data-testid="code-map-cloud"]')!;
   const terminal = terminalOf(root);
-  const cursor = terminal.querySelector("b")!;
+  const cursor = terminal.querySelector(".code-map-terminal-cursor")!;
   const litDot = () =>
     [...cloud.querySelectorAll("i")].findIndex((dot) => dot.dataset.lit !== undefined);
   expect(getComputedStyle(body.querySelector("i")!).transform).toBe("matrix(1, 0, 0, 0.14, 0, 0)");

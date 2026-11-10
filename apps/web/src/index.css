@@ -670,9 +670,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   }
 }
 
-/* Map sprite faces, shadows, thought clouds and terminals. CodeMapSprites sets data-state, data-look and data-done. */
 .code-map-sprite {
   --code-map-eye-unit: 1px;
+  --code-map-terminal-reach: 12px;
   --code-map-eye-look: translate(
     calc(var(--code-map-look-x, 0) * 1.5 * var(--code-map-eye-unit)),
     calc(var(--code-map-look-y, 0) * 1.5 * var(--code-map-eye-unit))
@@ -681,6 +681,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 
 .code-map-sprite[data-kind="subagent"] {
   --code-map-eye-unit: 0.6px;
+  --code-map-terminal-reach: 8px;
 }
 
 .code-map-shadow {
@@ -873,8 +874,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   visibility: visible;
 }
 
-.code-map-terminal i,
-.code-map-terminal b {
+.code-map-terminal-line,
+.code-map-terminal-cursor {
   position: absolute;
   left: 2px;
   height: 1.2px;
@@ -882,23 +883,18 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   background: color-mix(in srgb, var(--code-map-color) 70%, #eaf6ec);
 }
 
-.code-map-terminal b {
+.code-map-terminal-cursor {
   top: 7.5px;
   width: 2px;
   height: 3px;
 }
 
-.code-map-terminal[data-blink] b {
+.code-map-terminal[data-blink] .code-map-terminal-cursor {
   opacity: 0;
 }
 
-/* The bubble for a file lands clear of the terminal. */
 .code-map-sprite[data-state="working"] .code-map-say {
-  translate: 12px 0;
-}
-
-.code-map-sprite[data-kind="subagent"][data-state="working"] .code-map-say {
-  translate: 8px 0;
+  translate: var(--code-map-terminal-reach) 0;
 }
 
 @media (prefers-reduced-motion: reduce) {
