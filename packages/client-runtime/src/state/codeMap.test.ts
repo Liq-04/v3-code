@@ -71,7 +71,8 @@ function thread(
     subagentOf?: string;
     root?: string;
     project?: ProjectId;
-    run?: string;
+    /** Null is a busy session with no active run, as when a parent waits on background work. */
+    run?: string | null;
     /** A provider-native subagent: no T3 runtime or run, live only through its shell status. */
     native?: boolean;
     settled?: boolean;
@@ -118,7 +119,10 @@ function thread(
         }
       : null,
     source: {
-      activeRunId: opts.running && !opts.native ? RunId.make(opts.run ?? `run:${id}`) : null,
+      activeRunId:
+        opts.running && !opts.native && opts.run !== null
+          ? RunId.make(opts.run ?? `run:${id}`)
+          : null,
       status: opts.running ? "running" : opts.finished ? "completed" : "idle",
       activityRunStatus: null,
       pendingRuntimeRequest: null,
@@ -330,6 +334,12 @@ describe("deriveCodeMap", () => {
         thread("older", { worktree: "/wt/older", running: true }),
         thread("asks", { worktree: "/wt/asks", running: true, waiting: true, toolRunning: false }),
         thread("stopped", { worktree: "/wt/stopped", toolRunning: false }),
+        thread("lingers", {
+          worktree: "/wt/lingers",
+          running: true,
+          run: null,
+          toolRunning: false,
+        }),
         thread("child", { subagentOf: "thinks", running: true, toolRunning: false }),
       ],
       {},
@@ -341,6 +351,8 @@ describe("deriveCodeMap", () => {
       ["older", "working"],
       ["asks", "waiting"],
       ["stopped", "idle"],
+      // Its run ended and the session is still busy: no run means nothing is thinking.
+      ["lingers", "working"],
       // A subagent's shell hears its file touches only, so it is never told apart as thinking.
       ["child", "working"],
     ]);

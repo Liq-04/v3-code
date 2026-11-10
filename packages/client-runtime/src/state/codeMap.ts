@@ -259,9 +259,12 @@ interface CodeMapActor {
   readonly state: CodeMapSprite["state"];
 }
 
-// An older server names no tool state, which reads as working.
+// Thinking needs a run in flight: a session kept busy by background work has no tool running
+// either. An older server names no tool state, which reads as working.
 const busyStateOf = (thread: CodeMapThreadInput) =>
-  thread.source.toolRunning === false ? "thinking" : "working";
+  thread.source.activeRunId !== null && thread.source.toolRunning === false
+    ? "thinking"
+    : "working";
 
 const isBusy = (state: CodeMapSprite["state"]) => state === "working" || state === "thinking";
 
