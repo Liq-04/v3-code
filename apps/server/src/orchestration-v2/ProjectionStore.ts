@@ -1582,6 +1582,17 @@ function threadActiveFile(
   return touched && { ...touched, at: item.startedAt ?? item.updatedAt };
 }
 
+// A provider-native subagent has no run; its root turn node carries the live state.
+function nativeSubagentActivity(
+  projection: OrchestrationV2ThreadProjection,
+): "running" | "waiting" | null {
+  if (projection.thread.lineage.relationshipToParent !== "subagent") return null;
+  const root = projection.nodes.findLast(
+    (node) => node.kind === "root_turn" && node.runId === null,
+  );
+  return root?.status === "running" || root?.status === "waiting" ? root.status : null;
+}
+
 export function threadShellFromProjection(
   projection: OrchestrationV2ThreadProjection,
 ): OrchestrationV2ThreadShell {
@@ -1707,7 +1718,7 @@ export function threadShellFromProjection(
       ),
     activeRunId: activeRun?.id ?? null,
     blockedOnThreadWait: deriveBlockedOnThreadWait({ activeRun, turnItems: projection.turnItems }),
-    activityRunStatus: activityRun?.status ?? null,
+    activityRunStatus: activityRun?.status ?? nativeSubagentActivity(projection),
     activityRunStartedAt:
       activityRun === null ? null : orchestrationV2RunWorkStartedAt(activityRun),
     status: latestRun?.status ?? "idle",
@@ -6308,14 +6319,26 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               ) AS latest_run_stop_requested,
               active.run_id AS active_run_id,
               active.status AS active_run_status,
-              (
-                SELECT r.status
-                FROM orchestration_v2_projection_runs r
-                WHERE r.thread_id = t.thread_id
-                  AND r.status IN ('preparing', 'starting', 'running', 'waiting')
-                  AND NOT ${isSilentShellRun("r")}
-                ORDER BY r.ordinal DESC, r.run_id DESC
-                LIMIT 1
+              COALESCE(
+                (
+                  SELECT r.status
+                  FROM orchestration_v2_projection_runs r
+                  WHERE r.thread_id = t.thread_id
+                    AND r.status IN ('preparing', 'starting', 'running', 'waiting')
+                    AND NOT ${isSilentShellRun("r")}
+                  ORDER BY r.ordinal DESC, r.run_id DESC
+                  LIMIT 1
+                ),
+                -- A provider-native subagent has no run; its root turn node carries the live state.
+                CASE WHEN json_extract(t.payload_json, '$.lineage.relationshipToParent') = 'subagent' THEN (
+                  SELECT n.status
+                  FROM orchestration_v2_projection_nodes n
+                  WHERE n.thread_id = t.thread_id
+                    AND n.run_id IS NULL
+                    AND n.kind = 'root_turn'
+                    AND n.status IN ('running', 'waiting')
+                  LIMIT 1
+                ) END
               ) AS activity_run_status,
               (
                 -- Mirrors orchestrationV2RunWorkStartedAt.
@@ -7360,6 +7383,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             OR EXISTS (
               SELECT 1 FROM orchestration_v2_projection_runtime_requests request
               WHERE request.thread_id = t.thread_id AND request.status = 'pending'
+            )
+            OR EXISTS (
+              SELECT 1 FROM orchestration_v2_projection_nodes native_root
+              WHERE native_root.thread_id = t.thread_id AND native_root.run_id IS NULL
+                AND native_root.kind = 'root_turn' AND native_root.status IN ('running', 'waiting')
             )
             -- Same predicates as the shell's pending item and link reads, for their partial indexes.
             OR EXISTS (

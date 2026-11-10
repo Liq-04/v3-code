@@ -8741,3 +8741,91 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
     }),
   );
 });
+
+it.effect("a provider-native subagent's shell is live while its root turn runs", () =>
+  Effect.gen(function* () {
+    const store = yield* ProjectionStore.ProjectionStoreV2;
+    const now = yield* DateTime.now;
+    const parentId = ThreadId.make("thread:native-parent");
+    const childId = ThreadId.make("thread:native-child");
+    for (const [id, parent] of [
+      [parentId, null],
+      [childId, parentId],
+    ] as const) {
+      yield* store.apply({
+        id: EventId.make(`event:${id}:created`),
+        type: "thread.created",
+        threadId: id,
+        occurredAt: now,
+        payload: {
+          createdBy: parent ? "agent" : "user",
+          creationSource: parent ? "provider" : "web",
+          id,
+          projectId: ProjectId.make("project:native"),
+          title: id,
+          providerInstanceId,
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          activeProviderThreadId: null,
+          lineage: {
+            parentThreadId: parent,
+            relationshipToParent: parent ? "subagent" : null,
+            rootThreadId: parentId,
+          },
+          forkedFrom: null,
+          createdAt: now,
+          updatedAt: now,
+          archivedAt: null,
+          settledOverride: null,
+          settledAt: null,
+          lastVisitedAt: null,
+          deletedAt: null,
+        },
+      });
+    }
+    const rootNodeId = NodeId.make("node:native-child:root");
+    const setRoot = (status: "running" | "completed") =>
+      store.apply({
+        id: EventId.make(`event:native-child:root:${status}`),
+        type: "node.updated",
+        threadId: childId,
+        nodeId: rootNodeId,
+        driver,
+        occurredAt: now,
+        payload: {
+          id: rootNodeId,
+          threadId: childId,
+          runId: null,
+          rootNodeId,
+          parentNodeId: null,
+          kind: "root_turn",
+          status,
+          countsForRun: false,
+          providerThreadId: null,
+          providerTurnId: null,
+          nativeItemRef: null,
+          runtimeRequestId: null,
+          checkpointScopeId: null,
+          startedAt: now,
+          completedAt: status === "running" ? null : now,
+        },
+      });
+    const expectActivity = Effect.fnUntraced(function* (expected: "running" | null) {
+      const listed = (yield* store.getShellSnapshot()).threads.find((row) => row.id === childId);
+      const memory = ProjectionStore.threadShellFromProjection(
+        yield* store.getThreadProjection(childId),
+      );
+      for (const shell of [yield* store.getThreadShell(childId), listed, memory]) {
+        assert.equal(shell?.activityRunStatus ?? null, expected);
+      }
+    });
+
+    yield* setRoot("running");
+    yield* expectActivity("running");
+    yield* setRoot("completed");
+    yield* expectActivity(null);
+  }).pipe(Effect.provide(layerTest)),
+);
