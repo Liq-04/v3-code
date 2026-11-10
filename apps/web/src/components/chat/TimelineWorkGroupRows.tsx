@@ -111,7 +111,7 @@ export const WorkGroupSection = memo(function WorkGroupSection({
   );
 });
 
-function WorkingTimer({ createdAt }: { createdAt: string }) {
+export function WorkingTimer({ createdAt }: { createdAt: string }) {
   return (
     <span
       ref={tickTextContent(() => formatWorkingTimerNow(createdAt), true)}

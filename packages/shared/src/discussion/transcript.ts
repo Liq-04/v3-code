@@ -58,7 +58,7 @@ export function discussionTranscript(
 
 export type DiscussionTranscriptEntry<Work> =
   | { readonly kind: "line"; readonly line: DiscussionTranscriptLine }
-  | { readonly kind: "work"; readonly id: string; readonly entries: ReadonlyArray<Work> };
+  | { readonly kind: "work"; readonly id: string; readonly entries: Work[] };
 
 /**
  * The transcript with the agent's tool work between its lines, in time order. Consecutive work

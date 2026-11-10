@@ -144,6 +144,8 @@ export type TimelineEntry = (
       readonly kind: "event";
       readonly createdAt: string;
       readonly projectedItem: OrchestrationV2ProjectedTurnItem;
+      /** A discussion's tool work, which its card shows where the agent did it. */
+      readonly callWork?: ReadonlyArray<WorkLogEntry>;
     }
 ) & {
   readonly attempt?: TimelineAttempt;

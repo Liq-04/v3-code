@@ -36,7 +36,9 @@ export function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: 
     return (
       <DiscussionTimelineRow
         environmentId={ctx.activeThreadEnvironmentId}
+        rowId={row.id}
         item={item}
+        callWork={row.callWork}
         cwd={ctx.markdownCwd}
       />
     );

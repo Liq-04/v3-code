@@ -635,6 +635,7 @@ type MessagesTimelineRowContent =
       projectedItem: OrchestrationV2ProjectedTurnItem;
       subagents?: ReadonlyArray<OrchestrationV2ProjectedTurnItem>;
       resourceSummary?: boolean;
+      callWork?: ReadonlyArray<WorkLogEntry>;
     }
   | {
       kind: "proposed-plan";
@@ -2133,6 +2134,7 @@ export function deriveMessagesTimelineRows(input: {
         id: timelineEntry.id,
         createdAt: timelineEntry.createdAt,
         projectedItem: timelineEntry.projectedItem,
+        ...(timelineEntry.callWork === undefined ? {} : { callWork: timelineEntry.callWork }),
       });
       continue;
     }
@@ -2601,6 +2603,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       return (
         a.projectedItem === (b as typeof a).projectedItem &&
         a.resourceSummary === (b as typeof a).resourceSummary &&
+        a.callWork === (b as typeof a).callWork &&
         Equal.equals(a.subagents, (b as typeof a).subagents)
       );
 

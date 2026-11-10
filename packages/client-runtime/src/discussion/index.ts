@@ -10,3 +10,4 @@ export {
 } from "./controller.ts";
 export { getEnvironmentDiscussionStreamUrl } from "./environment.ts";
 export { discussionFold, type DiscussionFold } from "./fold.ts";
+export { callWorkRunHeader } from "./callWork.ts";
