@@ -266,6 +266,21 @@ describe("resolveSidebarThreadStatus", () => {
     ).toBe("input");
   });
 
+  it("keeps a thread on a call working between its turns, below the user's requests", () => {
+    const discussion = {
+      id: DiscussionId.make("discussion-1"),
+      startedAt: "2026-03-09T10:00:00.000Z",
+      heldBy: "Desktop",
+    };
+    expect(resolveSidebarThreadStatus({ ...idle, discussion })).toBe("working");
+    expect(resolveSidebarThreadStatus({ ...idle, discussion, pendingGuestMessageCount: 1 })).toBe(
+      "request",
+    );
+    expect(resolveSidebarThreadStatus({ ...idle, discussion, hasPendingApprovals: true })).toBe(
+      "approval",
+    );
+  });
+
   it("keeps usage-limit stops Limited and visible until the thread recovers", () => {
     const limited = {
       ...runtime,

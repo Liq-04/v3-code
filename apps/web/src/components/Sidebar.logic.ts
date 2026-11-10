@@ -858,6 +858,7 @@ type SidebarThreadStatusInput = Pick<
   | "pendingGuestMessageCount"
   | "runtime"
   | "blockedOnThreadWait"
+  | "discussion"
 >;
 
 export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): SidebarThreadStatus {
@@ -871,6 +872,8 @@ export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): Si
   if ((thread.pendingGuestMessageCount ?? 0) > 0) {
     return "request";
   }
+  // Between a call's turns the thread is still busy: it must not recede or notify per reply.
+  if (thread.discussion != null) return "working";
   if (thread.runtime?.status === "running" && thread.blockedOnThreadWait === true) {
     return "waiting";
   }
