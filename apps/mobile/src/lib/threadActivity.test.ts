@@ -1,4 +1,5 @@
 import {
+  DiscussionId,
   MessageId,
   CheckpointId,
   CheckpointRef,
@@ -370,6 +371,69 @@ function assistantMessage(updatedAt = "2026-06-20T00:00:03.000Z") {
 }
 
 describe("buildThreadFeed", () => {
+  it("moves a call's tool work into its card, including work that arrives after a cached build", () => {
+    const discussionId = DiscussionId.make("discussion-1");
+    const card = projected(
+      {
+        ...base("card", "2026-06-20T00:00:00.000Z", 0),
+        type: "discussion",
+        discussionId,
+        discussionStatus: "live",
+        summary: null,
+      },
+      0,
+    );
+    const line = projected(
+      {
+        ...userMessage("2026-06-20T00:00:01.000Z"),
+        id: TurnItemId.make("line"),
+        messageId: MessageId.make("line"),
+        context: { version: 1, records: [], discussion: { discussionId, spoken: "Run it" } },
+      },
+      1,
+    );
+    const earlier = projected(
+      { ...command("2026-06-20T00:00:00.500Z"), id: TurnItemId.make("earlier") },
+      2,
+    );
+    const first = projected({ ...command("2026-06-20T00:00:02.000Z") }, 3);
+    const second = projected(
+      { ...command("2026-06-20T00:00:03.000Z"), id: TurnItemId.make("second") },
+      4,
+    );
+    const cache = createThreadFeedCache();
+    const callWork = (items: OrchestrationV2ProjectedTurnItem[]) => {
+      const feed = buildThreadFeed(items, { cache });
+      const workIds = feed.flatMap((entry) =>
+        entry.type === "activity-group" &&
+        entry.activities[0]?.projectedItem.item.type !== "discussion"
+          ? entry.activities.map((activity) => activity.projectedItem.item.id)
+          : [],
+      );
+      const cardGroup = feed.find(
+        (entry) =>
+          entry.type === "activity-group" &&
+          entry.activities[0]?.projectedItem.item.type === "discussion",
+      );
+      return {
+        timeline: workIds,
+        card:
+          cardGroup?.type === "activity-group"
+            ? cardGroup.activities[0]?.callWork?.map((activity) => activity.projectedItem.item.id)
+            : undefined,
+      };
+    };
+
+    expect(callWork([card, line, earlier, first])).toEqual({
+      timeline: ["earlier"],
+      card: ["item-command"],
+    });
+    expect(callWork([card, line, earlier, first, second])).toEqual({
+      timeline: ["earlier"],
+      card: ["item-command", "second"],
+    });
+  });
+
   it("keeps async answers in question history instead of user bubbles", () => {
     const requestId = RuntimeRequestId.make("question");
     const question: OrchestrationV2TurnItem = {

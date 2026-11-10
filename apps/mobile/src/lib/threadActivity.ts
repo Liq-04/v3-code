@@ -41,6 +41,7 @@ import {
 } from "@t3tools/shared/t3McpToolPresentation";
 import type {
   ChatAttachment,
+  DiscussionId,
   MessageId,
   OrchestrationV2Actor,
   OrchestrationV2CreationSource,
@@ -119,6 +120,8 @@ export interface ThreadFeedActivity {
   readonly status: "success" | "failure" | "neutral" | null;
   readonly lifecycleStatus: WorkLogToolLifecycleStatus;
   readonly workEntry: WorkLogPresentationEntry;
+  /** On a discussion: the tool work the timeline leaves out, which its card shows. */
+  readonly callWork?: ReadonlyArray<ThreadFeedActivity>;
   readonly groupedToolDetail?: boolean;
   readonly live?: boolean;
   /** Lone calls carry the group header's label and id until a second call joins. */
@@ -2094,6 +2097,7 @@ interface ThreadFeedBuild {
   readonly nodes: ReadonlyArray<OrchestrationV2ExecutionNode> | undefined;
   readonly checkpointSummaries: ReadonlyArray<ThreadCheckpointSummary> | undefined;
   readonly foldedAnswerMessageIds: ReadonlySet<string>;
+  readonly foldedToolItemIds: ReadonlySet<string>;
   readonly delegatedChildrenByRun: ReadonlyMap<RunId, ReadonlySet<string>>;
   readonly feed: ReadonlyArray<ThreadFeedEntry>;
   /** Grouping is empty before `row`: the rows before it produced `feed.slice(0, feedLength)`. */
@@ -2163,6 +2167,24 @@ function firstChangedIndex<T>(previous: ReadonlyArray<T>, next: ReadonlyArray<T>
   return index;
 }
 
+function projectedActivityEntry(
+  row: OrchestrationV2ProjectedTurnItem,
+  attemptId: RunAttemptId | null,
+): Extract<RawThreadFeedEntry, { readonly type: "activity" }> {
+  const cached = projectedEntriesCache.get(row);
+  if (cached?.attemptId === attemptId && cached.entry.type === "activity") return cached.entry;
+  const activity = toFeedActivity(row, attemptId);
+  const entry: Extract<RawThreadFeedEntry, { readonly type: "activity" }> = {
+    type: "activity",
+    id: activity.id,
+    createdAt: activity.createdAt,
+    runId: row.item.runId,
+    activity,
+  };
+  projectedEntriesCache.set(row, { attemptId, entry });
+  return entry;
+}
+
 export function buildThreadFeed(
   visibleTurnItems: ReadonlyArray<OrchestrationV2ProjectedTurnItem>,
   options?: {
@@ -2197,8 +2219,10 @@ export function buildThreadFeed(
   // Thread-wide facts that change rows anywhere in the feed. A cached prefix
   // is reused only while these match the build that produced it.
   const foldedAnswerMessageIds = new Set<string>();
-  // A discussion's lines show inside its card.
-  for (const id of discussionFold(visibleTurnItems).messageIds) foldedAnswerMessageIds.add(id);
+  // A discussion's lines and tool work show inside its card.
+  const fold = discussionFold(visibleTurnItems);
+  for (const id of fold.messageIds) foldedAnswerMessageIds.add(id);
+  const foldedToolItemIds = new Set(fold.toolItems.keys());
   const delegatedChildrenByRun = new Map<RunId, Set<string>>();
   for (const { item } of visibleTurnItems) {
     if (item.type === "user_input_request" && item.questionAnswer) {
@@ -2220,6 +2244,7 @@ export function buildThreadFeed(
     previous.nodes === options?.nodes &&
     checkpointSummariesEqual(previous.checkpointSummaries, options?.checkpointSummaries) &&
     setsEqual(previous.foldedAnswerMessageIds, foldedAnswerMessageIds) &&
+    setsEqual(previous.foldedToolItemIds, foldedToolItemIds) &&
     setMapsEqual(previous.delegatedChildrenByRun, delegatedChildrenByRun)
   ) {
     const firstChanged = firstChangedIndex(previous.rows, visibleTurnItems);
@@ -2251,6 +2276,7 @@ export function buildThreadFeed(
     const item = row.item;
     if (turnItemIsWorkspacePreparation(item) && !item.deferredWork) continue;
     if (item.type === "todo_list" || item.type === "checkpoint") continue;
+    if (foldedToolItemIds.has(item.id)) continue;
     if (
       item.type === "user_message" &&
       item.inputIntent === "queued_turn" &&
@@ -2349,16 +2375,7 @@ export function buildThreadFeed(
       entryRows.push(index);
       continue;
     }
-    const activity = toFeedActivity(row, attemptId);
-    const entry: RawThreadFeedEntry = {
-      type: "activity",
-      id: activity.id,
-      createdAt,
-      runId: item.runId,
-      activity,
-    };
-    projectedEntriesCache.set(row, { attemptId, entry });
-    entries.push(entry);
+    entries.push(projectedActivityEntry(row, attemptId));
     entryRows.push(index);
   }
   const retainedMessageIds = new Set([
@@ -2432,10 +2449,60 @@ export function buildThreadFeed(
             nodes: options?.nodes,
             checkpointSummaries: options?.checkpointSummaries,
             foldedAnswerMessageIds,
+            foldedToolItemIds,
             delegatedChildrenByRun,
             feed,
             restarts,
           };
   }
-  return feed;
+  return attachCallWork(feed, visibleTurnItems, fold.toolItems, resolveAttemptId);
+}
+
+const callWorkGroupsCache = new WeakMap<
+  ThreadFeedActivityGroup,
+  { readonly callWork: ReadonlyArray<ThreadFeedActivity>; readonly group: ThreadFeedActivityGroup }
+>();
+
+/**
+ * Hands each discussion's tool work to its card. This runs after the feed build is cached, so a
+ * reused prefix never keeps a card's work from before the latest tool call.
+ */
+function attachCallWork(
+  feed: ThreadFeedEntry[],
+  rows: ReadonlyArray<OrchestrationV2ProjectedTurnItem>,
+  toolItems: ReadonlyMap<string, DiscussionId>,
+  resolveAttemptId: (item: OrchestrationV2TurnItem) => RunAttemptId | null,
+): ThreadFeedEntry[] {
+  if (toolItems.size === 0) return feed;
+  const byDiscussion = new Map<DiscussionId, ThreadFeedActivity[]>();
+  for (const row of rows) {
+    const discussionId = toolItems.get(row.item.id);
+    if (discussionId === undefined) continue;
+    const { activity } = projectedActivityEntry(row, resolveAttemptId(row.item));
+    if (!threadFeedActivityIsVisible(activity) && activity.lifecycleStatus !== "inProgress") {
+      continue;
+    }
+    const work = byDiscussion.get(discussionId);
+    if (work === undefined) byDiscussion.set(discussionId, [activity]);
+    else work.push(activity);
+  }
+  if (byDiscussion.size === 0) return feed;
+  return feed.map((entry) => {
+    if (entry.type !== "activity-group" || !isDiscussionActivityGroup(entry)) return entry;
+    const discussion = entry.activities[0]!;
+    const item = discussion.projectedItem.item;
+    const callWork = item.type === "discussion" ? byDiscussion.get(item.discussionId) : undefined;
+    if (callWork === undefined) return entry;
+    const cached = callWorkGroupsCache.get(entry);
+    if (
+      cached !== undefined &&
+      cached.callWork.length === callWork.length &&
+      cached.callWork.every((activity, index) => activity === callWork[index])
+    ) {
+      return cached.group;
+    }
+    const group = { ...entry, activities: [{ ...discussion, callWork }] };
+    callWorkGroupsCache.set(entry, { callWork, group });
+    return group;
+  });
 }
