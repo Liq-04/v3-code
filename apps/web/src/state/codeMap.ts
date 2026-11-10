@@ -77,11 +77,27 @@ export const codeMapBasesAtom: Atom.Writable<CodeMapBases, CodeMapBaseChoice> = 
 
 const baseInput = (baseRef: string | null) => (baseRef === null ? {} : { baseRef });
 
+// The snapshot lists the repository's worktrees once, so one an agent makes mid-run (Claude's
+// isolated subagents) stays unknown. Each thread's first touched file rereads them.
+const fileTouchersFamily = Atom.family((key: string) => {
+  const ref = parseScopedProjectKey(key);
+  return Atom.make((get) => {
+    const group = ref === null ? null : readGroup(get, ref);
+    if (group === null) return "";
+    return group.threads
+      .flatMap((thread) => (thread.source.activeFile ? [thread.id] : []))
+      .sort()
+      .join("\n");
+  });
+});
+
 const projectCodeMapSnapshot = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
   label: "environment-data:projects:code-map",
   tag: WS_METHODS.projectsGetCodeMap,
   staleTimeMs: 30_000,
   idleTtlMs: 5 * 60_000,
+  refreshTrigger: ({ environmentId, input }) =>
+    fileTouchersFamily(scopedProjectKey(scopeProjectRef(environmentId, input.projectId))),
 });
 
 export const codeMapSnapshotAtom = (ref: ScopedProjectRef, baseRef: string | null) =>
