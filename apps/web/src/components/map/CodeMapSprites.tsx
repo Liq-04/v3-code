@@ -64,7 +64,10 @@ interface Walker {
   readonly body: HTMLDivElement;
   input: SpriteInput;
   worldPos: Point | null;
-  /** Where the sprite ends up once `stops` drains. Only ever a place the world could anchor. */
+  /**
+   * Where the sprite ends up once `stops` drains. The world anchored it when it was named; a
+   * later layout may not.
+   */
   place: CodeMapPlace | null;
   leg: Leg | null;
   /** Paths named while a leg was in flight, visited in order. */

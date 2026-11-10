@@ -6341,7 +6341,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   ORDER BY r.ordinal DESC, r.run_id DESC
                   LIMIT 1
                 ),
-                -- Mirrors nativeSubagentActivity.
+                -- A provider-native subagent has no run. Its latest run-less root turn is live or
+                -- not, which nativeSubagentActivity reads the same way for the in-memory shell.
                 CASE WHEN json_extract(t.payload_json, '$.lineage.relationshipToParent') = 'subagent' THEN (
                   SELECT CASE WHEN n.status IN ('running', 'waiting') THEN n.status END
                   FROM orchestration_v2_projection_nodes n
