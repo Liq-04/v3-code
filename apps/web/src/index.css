@@ -739,7 +739,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   transform: translate(var(--code-map-eye-unit), calc(var(--code-map-eye-unit) * -1.5));
 }
 
-.code-map-sprite[data-state="working"] .code-map-eye {
+.code-map-sprite[data-state="working"] .code-map-eye,
+.code-map-sprite[data-state="thinking"][data-busy] .code-map-eye {
   transform: translateY(var(--code-map-eye-unit)) scaleY(0.72);
 }
 
@@ -798,7 +799,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   scale: 0.6;
 }
 
-.code-map-sprite[data-state="thinking"] .code-map-cloud {
+.code-map-sprite[data-state="thinking"]:not([data-busy]) .code-map-cloud {
   opacity: 1;
   visibility: visible;
   transform: none;

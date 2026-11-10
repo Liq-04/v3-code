@@ -92,6 +92,9 @@ const TAP_EVERY_BEATS = 2;
 const BLINK_EVERY_BEATS = 8;
 const HOP_EVERY_BEATS = 16;
 const CLOUD_DOTS = 3;
+// Reads finish faster than the shell can show a tool running, so a sprite that just named a
+// file is still busy reading; the cloud waits until the files stop coming.
+const READ_SETTLE_MS = 1500;
 
 const easeInOutQuad = (u: number) => (u < 0.5 ? 2 * u * u : 1 - (-2 * u + 2) ** 2 / 2);
 const easeOutCubic = (u: number) => 1 - (1 - u) ** 3;
@@ -291,6 +294,13 @@ function createSpriteLayer() {
 
   const onBeat = () => {
     beat++;
+    const now = performance.now();
+    for (const walker of walkers.values()) {
+      const settled = now - (walker.pathChangedAt ?? 0) >= READ_SETTLE_MS;
+      if (walker.el.dataset.busy !== undefined && !walker.leg && settled) {
+        delete walker.el.dataset.busy;
+      }
+    }
     if (reducedMotion()) return;
     for (const walker of walkers.values()) {
       const { state } = walker.input;
@@ -460,6 +470,7 @@ function createSpriteLayer() {
         walker.paceMs === null ? gap : walker.paceMs * (1 - PACE_ALPHA) + gap * PACE_ALPHA;
     }
     walker.pathChangedAt = now;
+    walker.el.dataset.busy = "";
     walker.stops.push(stop);
     if (walker.stops.length > MAX_STOPS) walker.stops.shift();
     const leg = walker.leg;

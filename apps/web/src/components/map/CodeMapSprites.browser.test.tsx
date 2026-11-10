@@ -290,3 +290,26 @@ it("hops a waiting sprite when it starts waiting and every 8 s, blinks it, and s
   vi.advanceTimersByTime(8000);
   expect(body.getAnimations()).toHaveLength(0);
 });
+
+it("holds the thinking cloud back while files keep coming and shows it once they stop", async () => {
+  const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
+  const thinkingAt = (path: string): SpriteInput => ({ ...agent(path), state: "thinking" });
+  // Mounted idle so the shared beat starts under the fake clock.
+  await using screen = await render(
+    <CodeMapSprites sprites={[inState("idle")]} world={world} camera={camera} {...idle} />,
+  );
+  using _clock = fakeTimers();
+  const root = spriteOf(screen.container, "root")!;
+
+  for (const path of [B, C, A]) {
+    await screen.rerender(
+      <CodeMapSprites sprites={[thinkingAt(path)]} world={world} camera={camera} {...idle} />,
+    );
+    vi.advanceTimersByTime(400);
+    expect(root.dataset.busy).toBeDefined();
+  }
+
+  vi.advanceTimersByTime(2500);
+  expect(root.dataset.state).toBe("thinking");
+  expect(root.dataset.busy).toBeUndefined();
+});
