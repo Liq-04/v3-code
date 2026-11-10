@@ -206,7 +206,8 @@ export function isFileTouchingTurnItem(
   return (
     item.type === "file_change" ||
     (item.type === "dynamic_tool" && item.toolName === FILE_READ_TOOL_NAME) ||
-    (item.type === "command_execution" && (item.readPaths?.length ?? 0) > 0)
+    ((item.type === "dynamic_tool" || item.type === "command_execution") &&
+      (item.readPaths?.length ?? 0) > 0)
   );
 }
 
@@ -225,11 +226,13 @@ const toolTurnItemTypes: ReadonlySet<string> = new Set(TOOL_TURN_ITEM_TYPES);
 export const isToolTurnItem = (item: Pick<OrchestrationV2TurnItem, "type">) =>
   toolTurnItemTypes.has(item.type);
 
-/** Every file a read tool or a shell command named, in the order it named them. */
+/** Every file a read tool, a search tool, or a shell command named, in the order it named them. */
 export function turnItemReadPaths(item: OrchestrationV2TurnItem): ReadonlyArray<string> {
-  if (item.type === "command_execution") return item.readPaths ?? [];
   if (item.type === "dynamic_tool" && item.toolName === FILE_READ_TOOL_NAME) {
     return collectToolFilePaths(item.input);
+  }
+  if (item.type === "dynamic_tool" || item.type === "command_execution") {
+    return item.readPaths ?? [];
   }
   return [];
 }

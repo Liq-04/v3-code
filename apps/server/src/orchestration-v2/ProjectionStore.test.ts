@@ -1355,11 +1355,28 @@ it.effect("shells name the file the latest tool touched by its absolute path", (
       toolName: "Read",
       input: { file_path: "/workspace/src/earlier-run.ts" },
     });
+    yield* updateItem({
+      ...itemOn(threadId, 13),
+      type: "dynamic_tool",
+      toolName: "Grep",
+      input: { pattern: "foo", path: "/workspace/src" },
+      readPaths: ["src/g.ts", "/workspace/src/e.ts"],
+    });
+    yield* expectActiveFile(threadId, { path: "/workspace/src/g.ts", op: "read" });
+    yield* updateItem({
+      ...itemOn(threadId, 14),
+      type: "command_execution",
+      input: "sed -n 1,80p src/h.ts",
+      readPaths: ["src/h.ts"],
+    });
+    yield* expectActiveFile(threadId, { path: "/workspace/src/h.ts", op: "read" });
 
     // Reads only, each path once, newest first; edits and other runs stay out.
     assert.deepEqual(yield* store.getRunReadPaths({ threadId, runId: runs[threadId]!.id }), [
-      "/workspace/src/a.ts",
+      "/workspace/src/h.ts",
+      "/workspace/src/g.ts",
       "/workspace/src/e.ts",
+      "/workspace/src/a.ts",
       "/workspace/src/f.ts",
       "/workspace/src/c.ts",
       "/other-checkout/src/a.ts",

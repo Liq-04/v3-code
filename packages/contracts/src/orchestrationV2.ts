@@ -1704,7 +1704,7 @@ export const OrchestrationV2TurnItem = Schema.Union([
     exitCode: Schema.optional(Schema.Int),
     /** Set when the command is a monitor, so background work lists it as a monitor. */
     monitor: Schema.optional(Schema.Boolean),
-    /** Absolute paths the provider reports the command reads, so the shell can name the file in use. */
+    /** Files the command reads, absolute or relative to the thread's root, so the shell can name the file in use. */
     readPaths: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   }),
   Schema.Struct({
@@ -1850,6 +1850,8 @@ export const OrchestrationV2TurnItem = Schema.Union([
     output: Schema.optional(Schema.Unknown),
     /** Set on the wire when output was withheld; fetch it with getTurnItem. */
     outputOmitted: Schema.optional(Schema.Boolean),
+    /** Files a search tool matched, absolute or relative to the thread's root, so the shell can name the file in use. */
+    readPaths: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   }),
 ]);
 export type OrchestrationV2TurnItem = typeof OrchestrationV2TurnItem.Type;
@@ -2568,7 +2570,7 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
     exitCode: Schema.optional(Schema.Int),
     /** Set when the command is a monitor, so background work lists it as a monitor. */
     monitor: Schema.optional(Schema.Boolean),
-    /** Absolute paths the provider reports the command reads, so the shell can name the file in use. */
+    /** Files the command reads, absolute or relative to the thread's root, so the shell can name the file in use. */
     readPaths: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   }),
   Schema.Struct({
@@ -2707,6 +2709,8 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
     output: Schema.optional(Schema.Unknown),
     /** Set on the wire when output was withheld; fetch it with getTurnItem. */
     outputOmitted: Schema.optional(Schema.Boolean),
+    /** Files a search tool matched, absolute or relative to the thread's root, so the shell can name the file in use. */
+    readPaths: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   }),
 ]);
 export type OrchestrationV2TurnItemJson = typeof OrchestrationV2TurnItemJson.Type;

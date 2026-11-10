@@ -6274,7 +6274,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           AND json_extract(${item}.payload_json, '$.toolName') = ${FILE_READ_TOOL_NAME}
         )
         OR (
-          ${item}.type = 'command_execution'
+          ${item}.type IN ('dynamic_tool', 'command_execution')
           AND json_array_length(${item}.payload_json, '$.readPaths') > 0
         )
       )`;

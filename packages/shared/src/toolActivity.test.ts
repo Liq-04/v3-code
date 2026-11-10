@@ -75,6 +75,17 @@ describe("toolActivity", () => {
         true,
       ],
       [{ ...base, type: "command_execution", input: "ls", readPaths: [] }, undefined, false],
+      [
+        {
+          ...base,
+          type: "dynamic_tool",
+          toolName: "Grep",
+          input: { pattern: "foo", path: "/repo/src" },
+          readPaths: ["src/i.ts", "src/j.ts"],
+        },
+        { path: "src/i.ts", op: "read" },
+        true,
+      ],
     ];
     for (const [item, touched, touching] of cases) {
       expect(turnItemTouchedFile(item)).toEqual(touched);
@@ -88,6 +99,7 @@ describe("toolActivity", () => {
       ["/repo/src/d.ts"],
       ["/repo/src/g.ts", "/repo/src/h.ts"],
       ["/repo/src/e.ts", "/repo/src/f.ts"],
+      ["src/i.ts", "src/j.ts"],
     ]);
   });
 
