@@ -379,7 +379,6 @@ it("shows a running subagent as a small sprite in its parent's colour and walks 
   const sub = sprite(screen, "s")!;
   expect(sub.dataset.kind).toBe("subagent");
   expect((sub.firstElementChild as HTMLElement).style.background).toBe(parentColor);
-  expect(sub.style.transform).toBe(parent.style.transform);
   expect(sub.className).not.toContain("opacity-50");
   vi.advanceTimersByTime(2000);
   expect(sub.style.transform).not.toBe(parent.style.transform);

@@ -118,6 +118,8 @@ const STROLL_MAX_BEATS = 28;
 const STROLL_MIN_PX = 40;
 const STROLL_MAX_PX = 90;
 const STROLL_EDGE_PX = 24;
+const NEAR_PARENT_MIN_PX = 24;
+const NEAR_PARENT_MAX_PX = 48;
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const easeInOutQuad = (u: number) => (u < 0.5 ? 2 * u * u : 1 - (-2 * u + 2) ** 2 / 2);
@@ -145,6 +147,13 @@ const samePlace = (a: CodeMapPlace | null, b: CodeMapPlace) =>
   a !== null && (a.kind === "file" ? b.kind === "file" && a.path === b.path : b.kind === "dock");
 
 const between = (min: number, max: number) => min + Math.random() * (max - min);
+
+// Seeded by thread so a reload or relayout keeps a sprite on the same spot.
+const unitHash = (id: string, seed: number) => {
+  let hash = 2166136261 ^ seed;
+  for (let i = 0; i < id.length; i++) hash = Math.imul(hash ^ id.charCodeAt(i), 16777619);
+  return (hash >>> 0) / 2 ** 32;
+};
 
 // The server stamped `idleSince` on its own clock, so it is read once against ours: a turn that
 // ended in our future just ended, and no stamp keeps a sprite awake past AWAKE_MS from now.
@@ -452,18 +461,23 @@ function createSpriteLayer() {
 
   const anchor = (walker: Walker, place: CodeMapPlace): Point | null => {
     if (!world || !camera) return null;
+    const { scale } = camera.get();
+    if (place.kind === "dock") {
+      const { root } = world;
+      const edge = STROLL_EDGE_PX / scale;
+      const top = root.y + root.headerHeight + edge;
+      return {
+        x: root.x + edge + unitHash(walker.threadId, 1) * Math.max(0, root.w - 2 * edge),
+        y: top + unitHash(walker.threadId, 2) * Math.max(0, root.y + root.h - edge - top),
+      };
+    }
+    const file = world.files.get(place.path);
+    if (!file) return null;
     let lane = 0;
     for (const other of walkers.values()) {
       if (other !== walker && samePlace(other.place, place) && !other.leaving) lane++;
     }
-    const { scale } = camera.get();
     const step = walker.input.kind === "agent" ? 14 : 8;
-    if (place.kind === "dock") {
-      const { root } = world;
-      return { x: root.x + (20 + lane * 30) / scale, y: root.y + root.headerHeight + 26 / scale };
-    }
-    const file = world.files.get(place.path);
-    if (!file) return null;
     return {
       x: file.x + file.w / 2 + (lane * step) / scale,
       y: file.y + Math.min(file.h * 0.35, 12 / scale),
@@ -715,13 +729,29 @@ function createSpriteLayer() {
   const besideParent = (input: SpriteInput): Point | null =>
     (input.parentThreadId && walkers.get(input.parentThreadId)?.worldPos) || null;
 
+  const nearParent = (input: SpriteInput): Point | null => {
+    const parent = besideParent(input);
+    if (!parent || !world || !camera) return parent;
+    const { scale } = camera.get();
+    const angle = unitHash(input.threadId, 3) * Math.PI * 2;
+    const reach =
+      (NEAR_PARENT_MIN_PX +
+        unitHash(input.threadId, 4) * (NEAR_PARENT_MAX_PX - NEAR_PARENT_MIN_PX)) /
+      scale;
+    const edge = STROLL_EDGE_PX / scale;
+    return {
+      x: clamp(parent.x + Math.cos(angle) * reach, edge, world.width - edge),
+      y: clamp(parent.y + Math.sin(angle) * reach, edge, world.height - edge),
+    };
+  };
+
   const spawn = (input: SpriteInput): Walker => {
     const walker: Walker = {
       threadId: input.threadId,
       ...createElement(input),
       linesPrinted: 0,
       input,
-      worldPos: besideParent(input),
+      worldPos: nearParent(input),
       place: null,
       leg: null,
       stops: [],
@@ -781,7 +811,7 @@ function createSpriteLayer() {
           walker.worldPos = home;
         }
       }
-      walker.worldPos ??= besideParent(input);
+      walker.worldPos ??= nearParent(input);
       apply(walker, input);
       project(walker);
     }

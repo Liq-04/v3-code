@@ -66,6 +66,19 @@ const positionOf = (el: HTMLElement) => {
   const [x, y] = [...el.style.transform.matchAll(/-?[\d.]+/g)].map(Number);
   return { x: x!, y: y! };
 };
+const distance = (a: HTMLElement, b: HTMLElement) => {
+  const [p, q] = [positionOf(a), positionOf(b)];
+  return Math.hypot(p.x - q.x, p.y - q.y);
+};
+const dockFraction = (el: HTMLElement, laidOut: typeof world) => {
+  const at = positionOf(el);
+  const { root } = laidOut;
+  const top = root.y + root.headerHeight + 24;
+  return {
+    x: (at.x - root.x - 24) / (root.w - 48),
+    y: (at.y - top) / (root.y + root.h - 24 - top),
+  };
+};
 const anchorsOf = (laidOut: typeof world) =>
   [...laidOut.files.values()].map((file) => ({
     path: file.path,
@@ -81,7 +94,7 @@ const standingOn = (el: HTMLElement, laidOut = world) => {
 };
 const seeded = (seed: number) => () => (seed = (seed * 16807) % 2147483647) / 2147483647;
 
-it("spawns a subagent at its parent in the parent's colour, walks it to its file, and walks it home when it finishes", async () => {
+it("spawns a subagent near its parent in the parent's colour, walks it to its file, and walks it home when it finishes", async () => {
   const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
   await using screen = await render(
     <CodeMapSprites sprites={[]} world={world} camera={camera} {...idle} />,
@@ -90,7 +103,8 @@ it("spawns a subagent at its parent in the parent's colour, walks it to its file
   await screen.rerender(
     <CodeMapSprites sprites={[agent(A)]} world={world} camera={camera} {...idle} />,
   );
-  const parentX = translateX(spriteOf(screen.container, "root")!);
+  const parent = spriteOf(screen.container, "root")!;
+  const parentX = translateX(parent);
 
   await screen.rerender(
     <CodeMapSprites sprites={[agent(A), subagent(B)]} world={world} camera={camera} {...idle} />,
@@ -98,7 +112,8 @@ it("spawns a subagent at its parent in the parent's colour, walks it to its file
   const sub = spriteOf(screen.container, "sub")!;
   expect(sub.dataset.kind).toBe("subagent");
   expect(sub.firstElementChild!.getAttribute("style")).toContain("rgb(10, 20, 30)");
-  expect(translateX(sub)).toBe(parentX);
+  expect(distance(sub, parent)).toBeGreaterThanOrEqual(24);
+  expect(distance(sub, parent)).toBeLessThanOrEqual(48);
   expect(sub.dataset.look).toBeDefined();
 
   vi.advanceTimersByTime(2000);
@@ -120,7 +135,7 @@ it("spawns a subagent at its parent in the parent's colour, walks it to its file
   expect(vi.getTimerCount()).toBe(1);
 });
 
-it("keeps a sprite in place when its path goes null and stands a fileless subagent at its parent", async () => {
+it("keeps a sprite in place when its path goes null and stands a fileless subagent near its parent", async () => {
   const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
   await using screen = await render(
     <CodeMapSprites sprites={[agent(A), subagent(null)]} world={world} camera={camera} {...idle} />,
@@ -128,7 +143,9 @@ it("keeps a sprite in place when its path goes null and stands a fileless subage
   const root = spriteOf(screen.container, "root")!;
   const placed = root.style.transform;
   expect(root.dataset.path).toBe(A);
-  expect(spriteOf(screen.container, "sub")!.style.transform).toBe(placed);
+  const near = distance(spriteOf(screen.container, "sub")!, root);
+  expect(near).toBeGreaterThanOrEqual(24);
+  expect(near).toBeLessThanOrEqual(48);
 
   await screen.rerender(
     <CodeMapSprites
@@ -153,7 +170,7 @@ it("keeps a sprite in place when its path goes null and stands a fileless subage
   const sub = spriteOf(screen.container, "sub")!;
   expect(root.style.transform).not.toBe(placed);
   expect(sub.style.visibility).toBe("");
-  expect(sub.style.transform).toBe(root.style.transform);
+  expect(distance(sub, root)).toBeCloseTo(near, 2);
 });
 
 it("repositions sprites when the camera moves without restarting a walk", async () => {
@@ -168,11 +185,12 @@ it("repositions sprites when the camera moves without restarting a walk", async 
   expect(root.dataset.look).toBeUndefined();
 });
 
-it("stands a thread with no file at the dock and walks it off once a file names its place", async () => {
+it("stands each thread with no file on its own spot of the map, keeps it through a relayout, and walks it off once a file names its place", async () => {
   const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
+  const other = { ...agent(null), threadId: ThreadId.make("other"), home: CODE_MAP_DOCK };
   await using screen = await render(
     <CodeMapSprites
-      sprites={[{ ...agent(null), home: CODE_MAP_DOCK }]}
+      sprites={[{ ...agent(null), home: CODE_MAP_DOCK }, other]}
       world={world}
       camera={camera}
       {...idle}
@@ -180,18 +198,24 @@ it("stands a thread with no file at the dock and walks it off once a file names 
   );
   const root = spriteOf(screen.container, "root")!;
   expect(root.style.visibility).toBe("");
-  expect(translateX(root)).toBeLessThan(world.root.x + 60);
+  const spot = dockFraction(root, world);
+  for (const at of [spot.x, spot.y]) {
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(at).toBeLessThanOrEqual(1);
+  }
+  expect(distance(root, spriteOf(screen.container, "other")!)).toBeGreaterThan(30);
 
   await screen.rerender(
     <CodeMapSprites
-      sprites={[{ ...agent(null), home: CODE_MAP_DOCK }]}
+      sprites={[{ ...agent(null), home: CODE_MAP_DOCK }, other]}
       world={resized}
       camera={camera}
       {...idle}
     />,
   );
   expect(root.style.visibility).toBe("");
-  expect(translateX(root)).toBeLessThan(resized.root.x + 60);
+  expect(dockFraction(root, resized).x).toBeCloseTo(spot.x, 5);
+  expect(dockFraction(root, resized).y).toBeCloseTo(spot.y, 5);
 
   using _clock = fakeTimers();
   await screen.rerender(
