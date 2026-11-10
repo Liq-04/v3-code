@@ -656,45 +656,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   }
 }
 
-@utility code-map-walk {
-  animation: code-map-step 0.26s ease-in-out infinite alternate;
-
-  @media (prefers-reduced-motion: reduce) {
-    animation: none;
-  }
-}
-
-@utility code-map-land {
-  animation: code-map-land 0.35s ease-out;
-
-  @media (prefers-reduced-motion: reduce) {
-    animation: none;
-  }
-}
-
 @utility code-map-say {
   animation: code-map-say 1.6s linear forwards;
-}
-
-@keyframes code-map-step {
-  from {
-    transform: translateY(0) rotate(-4deg);
-  }
-  to {
-    transform: translateY(-3px) rotate(4deg);
-  }
-}
-
-@keyframes code-map-land {
-  0% {
-    transform: scale(1.15, 0.8);
-  }
-  60% {
-    transform: scale(0.95, 1.06);
-  }
-  100% {
-    transform: none;
-  }
 }
 
 @keyframes code-map-say {
@@ -707,7 +670,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   }
 }
 
-/* Map sprite faces and thought clouds. CodeMapSprites sets data-state, data-look and data-done. */
+/* Map sprite faces, shadows and thought clouds. CodeMapSprites sets data-state, data-look and data-done. */
 .code-map-sprite {
   --code-map-eye-unit: 1px;
   --code-map-eye-look: translate(
@@ -718,6 +681,24 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 
 .code-map-sprite[data-kind="subagent"] {
   --code-map-eye-unit: 0.6px;
+}
+
+.code-map-shadow {
+  position: absolute;
+  bottom: -3px;
+  left: 2px;
+  z-index: -1;
+  width: 22px;
+  height: 6px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--foreground) 20%, transparent);
+}
+
+.code-map-sprite[data-kind="subagent"] .code-map-shadow {
+  bottom: -2px;
+  left: 1px;
+  width: 13px;
+  height: 4px;
 }
 
 .code-map-eye {

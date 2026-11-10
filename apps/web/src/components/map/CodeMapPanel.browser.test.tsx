@@ -328,11 +328,10 @@ it("walks the sprite to its new file, stops requesting frames, and stays when th
       ),
     ),
   );
-  const body = sprite(screen, "a")!.firstElementChild!;
   expect(sprite(screen, "a")!.dataset.path).toBe(ORCH);
-  expect(body.className).toContain("code-map-walk");
+  expect(sprite(screen, "a")!.dataset.look).toBeDefined();
   vi.advanceTimersByTime(2000);
-  expect(body.className).not.toContain("code-map-walk");
+  expect(sprite(screen, "a")!.dataset.look).toBeUndefined();
   expect(vi.getTimerCount()).toBe(0);
   const target = centreOf(screen, ORCH).rect;
   const landed = sprite(screen, "a")!.style.transform;
@@ -351,7 +350,7 @@ it("walks the sprite to its new file, stops requesting frames, and stays when th
     ),
   );
   expect(sprite(screen, "a")!.dataset.path).toBe(ORCH);
-  expect(body.className).not.toContain("code-map-walk");
+  expect(sprite(screen, "a")!.dataset.look).toBeUndefined();
   vi.advanceTimersByTime(500);
   expect(sprite(screen, "a")!.style.transform).toBe(landed);
   expect(vi.getTimerCount()).toBe(0);

@@ -38,14 +38,17 @@ interface Point {
   readonly y: number;
 }
 
+/** How a leg is covered: in hops when there is time for them, in one dash when there is not. */
+type Stride =
+  | { readonly kind: "hop"; readonly hops: number }
+  | { readonly kind: "dash"; readonly crouch: boolean };
+
 interface Leg {
   readonly from: Point;
   readonly to: Point;
   readonly startedAt: number;
-  /** A dash squashes in place this long before it glides. */
-  readonly holdMs: number;
-  readonly moveMs: number;
-  readonly dash: boolean;
+  readonly durationMs: number;
+  readonly stride: Stride;
   readonly onArrive: (() => void) | null;
 }
 
@@ -61,6 +64,7 @@ interface Walker {
   readonly threadId: ThreadId;
   readonly el: HTMLDivElement;
   readonly body: HTMLDivElement;
+  readonly shadow: HTMLElement;
   input: SpriteInput;
   worldPos: Point | null;
   /** Where the sprite ends up once `stops` drains. */
@@ -71,31 +75,35 @@ interface Walker {
   /** A moving average of the time between path changes, which budgets each leg. */
   paceMs: number | null;
   pathChangedAt: number | null;
-  pose: Animation | null;
+  pose: ReadonlyArray<Animation>;
   mood: Mood;
   awakeUntil: number;
-  /** Offsets this walker's blinks and taps on the shared beat so sprites do not move in step. */
+  /** Offsets this walker's blinks on the shared beat so sprites do not move in step. */
   readonly phase: number;
   cueBeat: number;
   strayed: boolean;
   leaving: boolean;
 }
 
-const MAX_WALK_MS = 1600;
-const WALK_BASE_MS = 250;
-const WALK_MS_PER_PX = 2.2;
+const WALK_HOP_MS = 560;
+const TWO_HOP_PX = 110;
+// Where in a hop the sprite leaves the ground and touches down; it travels only between them.
+const HOP_LIFT = 0.16;
+const HOP_LAND = 0.84;
+// Where in a dash the crouch ends and the skid back from the overshoot begins.
+const DASH_CROUCH = 0.18;
+const DASH_SKID = 0.78;
+const DASH_OVERSHOOT = 1.04;
+const SUBAGENT_SCALE = 0.6;
 const FADE_MS = 320;
 const HOVER_DELAY_MS = 150;
 const PACE_ALPHA = 0.4;
 // A longer gap budgets a full walk whatever the distance, so it must not outweigh a burst after it.
-const PACE_CEILING_MS = MAX_WALK_MS / 0.8;
+const PACE_CEILING_MS = (2 * WALK_HOP_MS) / 0.8;
 const MIN_LEG_MS = 140;
 const MAX_STOPS = 6;
 const DASH_MIN_PX = 24;
-const DASH_SQUASH_MS = 70;
-const PASS_TICK_MS = 110;
 const BEAT_MS = 500;
-const TAP_EVERY_BEATS = 2;
 const BLINK_EVERY_BEATS = 8;
 const HOP_EVERY_BEATS = 16;
 const CLOUD_DOTS = 3;
@@ -108,16 +116,28 @@ const STROLL_MAX_BEATS = 28;
 const STROLL_MIN_PX = 40;
 const STROLL_MAX_PX = 90;
 const STROLL_EDGE_PX = 24;
-const AMBLE_MS_PER_PX = 18;
 
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const easeInOutQuad = (u: number) => (u < 0.5 ? 2 * u * u : 1 - (-2 * u + 2) ** 2 / 2);
 const easeOutCubic = (u: number) => 1 - (1 - u) ** 3;
+
+/** The share of its leg a sprite has covered at `u` of the leg's time. */
+const travelled = (stride: Stride, u: number) => {
+  if (stride.kind === "hop") {
+    const hop = Math.min(Math.floor(u * stride.hops), stride.hops - 1);
+    const air = (easeInOutQuad(u * stride.hops - hop) - HOP_LIFT) / (HOP_LAND - HOP_LIFT);
+    return (hop + clamp(air, 0, 1)) / stride.hops;
+  }
+  const at = easeOutCubic(u);
+  const crouch = stride.crouch ? DASH_CROUCH : 0;
+  if (at < DASH_SKID) return (DASH_OVERSHOOT * Math.max(0, at - crouch)) / (DASH_SKID - crouch);
+  return DASH_OVERSHOOT - ((DASH_OVERSHOOT - 1) * (at - DASH_SKID)) / (1 - DASH_SKID);
+};
 
 const samePlace = (a: CodeMapPlace | null, b: CodeMapPlace) =>
   a !== null && (a.kind === "file" ? b.kind === "file" && a.path === b.path : b.kind === "dock");
 
 const between = (min: number, max: number) => min + Math.random() * (max - min);
-const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 // The server stamped `idleSince` on its own clock, so it is read once against ours: a turn that
 // ended in our future just ended, and no stamp keeps a sprite awake past AWAKE_MS from now.
@@ -154,7 +174,7 @@ const HOP_KEYFRAMES = [
   { translate: "0 0", scale: "1 1" },
 ];
 
-function createElement(input: SpriteInput): { el: HTMLDivElement; body: HTMLDivElement } {
+function createElement(input: SpriteInput) {
   const el = document.createElement("div");
   el.dataset.testid = "code-map-sprite";
   el.dataset.threadId = input.threadId;
@@ -176,8 +196,10 @@ function createElement(input: SpriteInput): { el: HTMLDivElement; body: HTMLDivE
     cloud.lastElementChild!.appendChild(document.createElement("i"));
   }
   cloud.querySelector("i")!.dataset.lit = "";
-  el.append(body, cloud);
-  return { el, body };
+  const shadow = document.createElement("span");
+  shadow.className = "code-map-shadow";
+  el.append(body, cloud, shadow);
+  return { el, body, shadow };
 }
 
 /** Turns the eyes toward a screen direction, or back to their state's expression for none. */
@@ -200,27 +222,105 @@ const blink = (walker: Walker) => {
   }
 };
 
-const tap = (walker: Walker) =>
-  walker.body.animate(
-    { scale: ["1 1", "1.06 0.9", "1 1"] },
-    { duration: 220, easing: "ease-in-out" },
-  );
-
 const hop = (walker: Walker) => {
   if (!reducedMotion()) {
     walker.body.animate(HOP_KEYFRAMES, { duration: 620, easing: "ease-in-out" });
   }
 };
 
-const strike = (walker: Walker, pose: Animation | null) => {
-  walker.pose?.cancel();
+const hopFrame = (lift: number, scale: string, lean: number) =>
+  `translateY(${-lift}px) scale(${scale}) rotate(${lean}deg)`;
+
+const dashFrame = (lift: number, scale: string, skew: number) =>
+  `translateY(${-lift}px) scale(${scale}) skewX(${skew}deg)`;
+
+/**
+ * The body's squash and stretch for a leg, with the eyes trailing it and the shadow shrinking
+ * under a hop. `lean` is how far the leg heads right, from -1 to 1.
+ */
+const poseFor = (
+  walker: Walker,
+  stride: Stride,
+  lean: number,
+  durationMs: number,
+): ReadonlyArray<Animation> => {
+  const { body, shadow } = walker;
+  const unit = walker.input.kind === "agent" ? 1 : SUBAGENT_SCALE;
+  const eyes = [...body.querySelectorAll("i")];
+  if (stride.kind === "hop") {
+    const timing = {
+      duration: durationMs / stride.hops,
+      iterations: stride.hops,
+      easing: "ease-in-out",
+    };
+    return [
+      body.animate(
+        [
+          { transform: hopFrame(0, "1, 1", 0) },
+          { transform: hopFrame(0, "1.14, 0.84", 0), offset: HOP_LIFT },
+          { transform: hopFrame(12 * unit, "0.88, 1.14", lean * 8), offset: 0.42 },
+          { transform: hopFrame(14 * unit, "0.96, 1.04", lean * 4.8), offset: 0.58 },
+          { transform: hopFrame(0, "1.16, 0.82", 0), offset: HOP_LAND },
+          { transform: hopFrame(0, "1, 1", 0) },
+        ],
+        timing,
+      ),
+      shadow.animate(
+        { scale: [1, 1.1, 0.7, 1.1, 1], offset: [0, HOP_LIFT, 0.5, HOP_LAND, 1] },
+        timing,
+      ),
+      ...eyes.map((eye) =>
+        eye.animate(
+          {
+            translate: [
+              "0 0",
+              `${-lean * 0.8 * unit}px ${unit}px`,
+              `${lean * 1.2 * unit}px ${-0.5 * unit}px`,
+              "0 0",
+            ],
+            offset: [0, 0.42, HOP_LAND, 1],
+          },
+          timing,
+        ),
+      ),
+    ];
+  }
+  const timing = { duration: durationMs, easing: "ease-out" };
+  return [
+    body.animate(
+      [
+        { transform: dashFrame(0, "1, 1", 0) },
+        ...(stride.crouch
+          ? [{ transform: dashFrame(0, "1.22, 0.74", 0), offset: DASH_CROUCH }]
+          : []),
+        { transform: dashFrame(2 * unit, "1.42, 0.7", -lean * 16), offset: 0.4 },
+        { transform: dashFrame(unit, "1.3, 0.78", -lean * 12), offset: 0.66 },
+        { transform: dashFrame(0, "0.86, 1.16", lean * 8), offset: 0.82 },
+        { transform: dashFrame(0, "1.08, 0.94", 0), offset: 0.92 },
+        { transform: dashFrame(0, "1, 1", 0) },
+      ],
+      timing,
+    ),
+    ...eyes.map((eye) =>
+      eye.animate(
+        {
+          translate: ["0 0", `${-lean * 1.5 * unit}px 0`, `${lean * 2 * unit}px 0`, "0 0"],
+          offset: [0, 0.4, 0.82, 1],
+        },
+        timing,
+      ),
+    ),
+  ];
+};
+
+const strike = (walker: Walker, pose: ReadonlyArray<Animation>) => {
+  for (const animation of walker.pose) animation.cancel();
   walker.pose = pose;
 };
 
 const halt = (walker: Walker) => {
   walker.leg = null;
-  strike(walker, null);
-  walker.body.classList.remove("code-map-walk");
+  strike(walker, []);
 };
 
 const say = (walker: Walker, text: string) => {
@@ -350,8 +450,8 @@ function createSpriteLayer() {
     for (const walker of walkers.values()) {
       const leg = walker.leg;
       if (!leg) continue;
-      const u = Math.min(1, Math.max(0, (now - leg.startedAt - leg.holdMs) / leg.moveMs));
-      const e = leg.dash ? easeOutCubic(u) : easeInOutQuad(u);
+      const u = clamp((now - leg.startedAt) / leg.durationMs, 0, 1);
+      const e = u < 1 ? travelled(leg.stride, u) : 1;
       walker.worldPos = {
         x: leg.from.x + (leg.to.x - leg.from.x) * e,
         y: leg.from.y + (leg.to.y - leg.from.y) * e,
@@ -371,7 +471,6 @@ function createSpriteLayer() {
         dot.toggleAttribute("data-lit", index === beat % CLOUD_DOTS);
       });
     }
-    if (mood === "working" && own % TAP_EVERY_BEATS === 0 && !walker.leg) tap(walker);
     if (mood === "waiting" && (beat - walker.cueBeat) % HOP_EVERY_BEATS === 0) hop(walker);
     if (mood === "awake" && beat >= walker.cueBeat) stroll(walker);
     if (own % BLINK_EVERY_BEATS === 0) blink(walker);
@@ -406,24 +505,9 @@ function createSpriteLayer() {
 
   const arrive = (walker: Walker, leg: Leg, now: number) => {
     halt(walker);
-    walker.body.classList.remove("code-map-land");
-    const next = depart(walker, now);
-    if (next) {
-      // A dash opens with its own squash, so only a walk needs the passing tick.
-      if (!next.dash) {
-        strike(
-          walker,
-          walker.body.animate([{ transform: "scale(1.08, 0.9)" }, { transform: "none" }], {
-            duration: PASS_TICK_MS,
-          }),
-        );
-      }
-      return;
-    }
+    if (depart(walker, now)) return;
     look(walker, 0, 0);
     if (walker.mood !== "idle") blink(walker);
-    void walker.body.offsetWidth;
-    walker.body.classList.add("code-map-land");
     leg.onArrive?.();
   };
 
@@ -456,42 +540,19 @@ function createSpriteLayer() {
       onArrive?.();
       return null;
     }
-    const walkMs =
-      gait === "amble"
-        ? distance * AMBLE_MS_PER_PX
-        : Math.min(MAX_WALK_MS, WALK_BASE_MS + distance * WALK_MS_PER_PX);
+    const hops = distance > TWO_HOP_PX ? 2 : 1;
+    const walkMs = hops * WALK_HOP_MS;
     const budgetMs = (gait === "paced" ? legBudget(walker) : null) ?? walkMs;
     const durationMs = Math.min(walkMs, budgetMs);
-    const dash = budgetMs < walkMs && distance > DASH_MIN_PX;
-    // A leg hurried mid-stride is already moving, so it skips the squash.
-    const holdMs = dash && !interrupted ? Math.min(DASH_SQUASH_MS, durationMs * 0.25) : 0;
-    const moveMs = dash ? durationMs * 0.75 : durationMs;
-    const leg: Leg = { from, to, startedAt: now, holdMs, moveMs, dash, onArrive };
+    // A leg hurried mid-stride is already moving, so it skips the crouch.
+    const stride: Stride =
+      budgetMs < walkMs && distance > DASH_MIN_PX
+        ? { kind: "dash", crouch: !interrupted }
+        : { kind: "hop", hops };
+    const leg: Leg = { from, to, startedAt: now, durationMs, stride, onArrive };
     walker.leg = leg;
     look(walker, dx, dy);
-    walker.body.classList.remove("code-map-land");
-    walker.body.classList.toggle("code-map-walk", !dash);
-    if (dash) {
-      const lean = `scale(1.18, 0.86) rotate(${Math.sign(dx) * 6}deg)`;
-      const squashed = holdMs / (holdMs + moveMs);
-      const windUp =
-        holdMs > 0
-          ? [
-              { transform: "none" },
-              { transform: "scale(1.14, 0.82)", offset: squashed },
-              { transform: lean, offset: squashed + 0.1 },
-            ]
-          : [{ transform: "none" }, { transform: lean, offset: 0.15 }];
-      strike(
-        walker,
-        walker.body.animate([...windUp, { transform: lean }], {
-          duration: holdMs + moveMs,
-          fill: "forwards",
-        }),
-      );
-    } else {
-      strike(walker, null);
-    }
+    strike(walker, poseFor(walker, stride, distance === 0 ? 0 : dx / distance, durationMs));
     tick();
     return leg;
   };
@@ -532,7 +593,7 @@ function createSpriteLayer() {
       return;
     }
     const budgetMs = legBudget(walker);
-    const remainingMs = leg.startedAt + leg.holdMs + leg.moveMs - now;
+    const remainingMs = leg.startedAt + leg.durationMs - now;
     if (budgetMs !== null && remainingMs > budgetMs) {
       startLeg(walker, leg.to, now, "paced", leg.onArrive);
     }
@@ -625,11 +686,9 @@ function createSpriteLayer() {
     (input.parentThreadId && walkers.get(input.parentThreadId)?.worldPos) || null;
 
   const spawn = (input: SpriteInput): Walker => {
-    const { el, body } = createElement(input);
     const walker: Walker = {
       threadId: input.threadId,
-      el,
-      body,
+      ...createElement(input),
       input,
       worldPos: besideParent(input),
       place: null,
@@ -637,7 +696,7 @@ function createSpriteLayer() {
       stops: [],
       paceMs: null,
       pathChangedAt: null,
-      pose: null,
+      pose: [],
       mood: "idle",
       awakeUntil: awakeUntilOf(input.idleSince, Date.now()),
       phase: spawned++,
@@ -647,7 +706,7 @@ function createSpriteLayer() {
     };
     walkers.set(input.threadId, walker);
     listen(walker);
-    container?.appendChild(el);
+    container?.appendChild(walker.el);
     setMood(walker, moodOf(walker, Date.now()));
     return walker;
   };

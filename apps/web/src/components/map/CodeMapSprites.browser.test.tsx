@@ -99,7 +99,7 @@ it("spawns a subagent at its parent in the parent's colour, walks it to its file
   expect(sub.dataset.kind).toBe("subagent");
   expect(sub.firstElementChild!.getAttribute("style")).toContain("rgb(10, 20, 30)");
   expect(translateX(sub)).toBe(parentX);
-  expect(sub.firstElementChild!.className).toContain("code-map-walk");
+  expect(sub.dataset.look).toBeDefined();
 
   vi.advanceTimersByTime(2000);
   const target = rectOf(world, B)!;
@@ -111,7 +111,7 @@ it("spawns a subagent at its parent in the parent's colour, walks it to its file
   await screen.rerender(
     <CodeMapSprites sprites={[agent(A)]} world={world} camera={camera} {...idle} />,
   );
-  expect(sub.firstElementChild!.className).toContain("code-map-walk");
+  expect(sub.dataset.look).toBeDefined();
   vi.advanceTimersByTime(2000);
   expect(translateX(sub)).toBe(parentX);
   expect(sub.style.opacity).toBe("0");
@@ -140,7 +140,7 @@ it("keeps a sprite in place when its path goes null and stands a fileless subage
   );
   expect(root.style.transform).toBe(placed);
   expect(root.dataset.path).toBe(A);
-  expect(root.firstElementChild!.className).not.toContain("code-map-walk");
+  expect(root.dataset.look).toBeUndefined();
 
   await screen.rerender(
     <CodeMapSprites
@@ -165,7 +165,7 @@ it("repositions sprites when the camera moves without restarting a walk", async 
   const x = translateX(root);
   camera.jumpTo({ x: 50, y: 0, scale: 2 });
   expect(translateX(root)).toBeCloseTo(x * 2 + 50, 2);
-  expect(root.firstElementChild!.className).not.toContain("code-map-walk");
+  expect(root.dataset.look).toBeUndefined();
 });
 
 it("stands a thread with no file at the dock and walks it off once a file names its place", async () => {
@@ -208,7 +208,7 @@ it("stands a thread with no file at the dock and walks it off once a file names 
   expect(translateX(root)).toBeGreaterThan(target.x);
 });
 
-it("stands on every file of a fast burst in order and lands on the last one soon after it", async () => {
+it("dashes onto every file of a fast burst in order, skidding past and back, and lands on the last one soon after it", async () => {
   const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
   await using screen = await render(
     <CodeMapSprites sprites={[]} world={world} camera={camera} {...idle} />,
@@ -220,9 +220,11 @@ it("stands on every file of a fast burst in order and lands on the last one soon
   const root = spriteOf(screen.container, "root")!;
   const stood: string[] = [];
   const said: string[] = [];
+  let rightmost = 0;
   const watch = (ms: number) => {
     for (let elapsed = 0; elapsed < ms; elapsed += 4) {
       vi.advanceTimersByTime(4);
+      rightmost = Math.max(rightmost, positionOf(root).x);
       const path = standingOn(root);
       if (path !== null && stood.at(-1) !== path) stood.push(path);
       const text = root.querySelector('[data-testid="code-map-say"]')?.textContent;
@@ -240,11 +242,65 @@ it("stands on every file of a fast burst in order and lands on the last one soon
   watch(500);
 
   expect(stood).toEqual([A, B, C, A, B, C]);
+  expect(rightmost).toBeGreaterThan(Math.max(...anchorsOf(world).map((anchor) => anchor.x)) + 1);
   expect(standingOn(root)).toBe(C);
   expect(said).toEqual(["Edit ChatView.tsx", "Edit index.css"]);
-  expect(root.firstElementChild!.className).not.toContain("code-map-walk");
   expect(root.dataset.look).toBeUndefined();
   expect(vi.getTimerCount()).toBe(1);
+});
+
+it("hops once to a near file and twice to a far one, travelling only while it is off the ground", async () => {
+  const [a, b] = anchorsOf(world);
+  const apart = Math.hypot(b!.x - a!.x, b!.y - a!.y);
+  const camera = createCameraStore({ x: 0, y: 0, scale: 60 / apart });
+  await using screen = await render(
+    <CodeMapSprites sprites={[]} world={world} camera={camera} {...idle} />,
+  );
+  using _clock = fakeTimers();
+  await screen.rerender(
+    <CodeMapSprites sprites={[agent(a!.path)]} world={world} camera={camera} {...idle} />,
+  );
+  const root = spriteOf(screen.container, "root")!;
+  const flightsTo = async (path: string) => {
+    await screen.rerender(
+      <CodeMapSprites sprites={[agent(path)]} world={world} camera={camera} {...idle} />,
+    );
+    let flights = 0;
+    let flying = false;
+    let at = positionOf(root);
+    for (let elapsed = 0; elapsed < 2000; elapsed += 16) {
+      vi.advanceTimersByTime(16);
+      const next = positionOf(root);
+      const moved = next.x !== at.x || next.y !== at.y;
+      if (moved && !flying) flights++;
+      flying = moved;
+      at = next;
+    }
+    return flights;
+  };
+
+  expect(await flightsTo(b!.path)).toBe(1);
+  expect(positionOf(root).x).toBeCloseTo((b!.x * 60) / apart, 2);
+
+  camera.jumpTo({ x: 0, y: 0, scale: 300 / apart });
+  expect(await flightsTo(a!.path)).toBe(2);
+  expect(positionOf(root).x).toBeCloseTo((a!.x * 300) / apart, 2);
+});
+
+it("moves a sprite straight onto its file when motion is reduced", async () => {
+  const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
+  await using screen = await render(
+    <CodeMapSprites sprites={[agent(A)]} world={world} camera={camera} {...idle} />,
+  );
+  using _motion = vi
+    .spyOn(window, "matchMedia")
+    .mockReturnValue({ matches: true } as MediaQueryList);
+  await screen.rerender(
+    <CodeMapSprites sprites={[agent(B)]} world={world} camera={camera} {...idle} />,
+  );
+  const root = spriteOf(screen.container, "root")!;
+  expect(standingOn(root)).toBe(B);
+  expect(root.firstElementChild!.getAnimations()).toHaveLength(0);
 });
 
 const inState = (state: SpriteInput["state"]): SpriteInput => ({ ...agent(A), state });
@@ -253,7 +309,7 @@ const stopAnimations = (...elements: ReadonlyArray<Element>) => {
     for (const animation of element.getAnimations()) animation.cancel();
 };
 
-it("steps a thinking sprite's cloud and taps a working one on a beat that stops when all are idle", async () => {
+it("steps a thinking sprite's cloud on a beat that stops when all are idle", async () => {
   const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
   await using screen = await render(
     <CodeMapSprites sprites={[inState("idle")]} world={world} camera={camera} {...idle} />,
@@ -284,9 +340,7 @@ it("steps a thinking sprite's cloud and taps a working one on a beat that stops 
     <CodeMapSprites sprites={[inState("working")]} world={world} camera={camera} {...idle} />,
   );
   expect(root.dataset.state).toBe("working");
-  stopAnimations(body);
   vi.advanceTimersByTime(1000);
-  expect(body.getAnimations()).toHaveLength(1);
   expect(litDot()).toBe(0);
 
   await screen.rerender(
@@ -391,7 +445,7 @@ it("strolls an idle sprite whose turn just ended without moving its place, walks
   vi.advanceTimersByTime(3000);
   const home = rectOf(world, A)!;
   expect(translateX(root)).toBeGreaterThan(home.x + home.w / 2 + 30);
-  expect(body.className).not.toContain("code-map-walk");
+  expect(root.dataset.look).toBeUndefined();
   expect(root.querySelector('[data-testid="code-map-say"]')).toBeNull();
   expect(root.dataset.busy).toBeUndefined();
   expect(root.dataset.path).toBe(A);
@@ -409,23 +463,21 @@ it("strolls an idle sprite whose turn just ended without moving its place, walks
     <CodeMapSprites sprites={[rested(-12_500)]} world={world} camera={camera} {...idle} />,
   );
   vi.advanceTimersByTime(8300);
-  expect(body.className).toContain("code-map-walk");
+  expect(root.dataset.look).toBeDefined();
   await screen.rerender(
     <CodeMapSprites sprites={[agent(B)]} world={world} camera={camera} {...idle} />,
   );
   const stood = new Set<string>();
-  const saidOnLanding: Array<string | undefined> = [];
+  const said: Array<{ text: string; on: string | null }> = [];
   for (let elapsed = 0; elapsed < 2000; elapsed += 4) {
     vi.advanceTimersByTime(4);
-    const path = standingOn(root);
-    if (path === null) continue;
-    if (!stood.has(path)) {
-      saidOnLanding.push(root.querySelector('[data-testid="code-map-say"]')?.textContent);
-    }
-    stood.add(path);
+    const on = standingOn(root);
+    if (on !== null) stood.add(on);
+    const text = root.querySelector('[data-testid="code-map-say"]')?.textContent;
+    if (text && said.at(-1)?.text !== text) said.push({ text, on });
   }
   expect([...stood]).toEqual([B]);
-  expect(saidOnLanding).toEqual(["Edit git.ts"]);
+  expect(said).toEqual([{ text: "Edit git.ts", on: B }]);
 });
 
 it("stops a stroll where the pointer catches the sprite, so its hover card stays on it", async () => {
@@ -442,13 +494,13 @@ it("stops a stroll where the pointer catches the sprite, so its hover card stays
   );
   const root = spriteOf(screen.container, "root")!;
   vi.advanceTimersByTime(8300);
-  expect(root.firstElementChild!.className).toContain("code-map-walk");
+  expect(root.dataset.look).toBeDefined();
 
   root.dispatchEvent(new PointerEvent("pointerenter"));
   const caught = positionOf(root);
   vi.advanceTimersByTime(1000);
   expect(positionOf(root)).toEqual(caught);
-  expect(root.firstElementChild!.className).not.toContain("code-map-walk");
+  expect(root.dataset.look).toBeUndefined();
   const layer = root.parentElement!.getBoundingClientRect();
   const box = root.getBoundingClientRect();
   expect(onHover).toHaveBeenLastCalledWith({
