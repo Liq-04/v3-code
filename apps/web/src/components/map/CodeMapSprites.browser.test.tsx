@@ -74,10 +74,14 @@ const standingOn = (el: HTMLElement) => {
 
 it("spawns a subagent at its parent in the parent's colour, walks it to its file, and walks it home when it finishes", async () => {
   const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
+  // Mounted empty so the shared beat starts under the fake clock.
   await using screen = await render(
-    <CodeMapSprites sprites={[agent(A)]} world={world} camera={camera} {...idle} />,
+    <CodeMapSprites sprites={[]} world={world} camera={camera} {...idle} />,
   );
   using _clock = fakeTimers();
+  await screen.rerender(
+    <CodeMapSprites sprites={[agent(A)]} world={world} camera={camera} {...idle} />,
+  );
   const parentX = translateX(spriteOf(screen.container, "root")!);
 
   await screen.rerender(
@@ -94,8 +98,8 @@ it("spawns a subagent at its parent in the parent's colour, walks it to its file
   expect(translateX(sub)).toBeGreaterThan(target.x);
   expect(translateX(sub)).toBeLessThan(target.x + target.w);
   expect(sub.querySelector('[data-testid="code-map-say"]')).toHaveTextContent("Read git.ts");
-  // The working sprite's beat predates the fake clock, so this counts walk frames only.
-  expect(vi.getTimerCount()).toBe(0);
+  // The working parent's beat is the one timer left: no walk frame, no fade.
+  expect(vi.getTimerCount()).toBe(1);
 
   await screen.rerender(
     <CodeMapSprites sprites={[agent(A)]} world={world} camera={camera} {...idle} />,
@@ -106,8 +110,8 @@ it("spawns a subagent at its parent in the parent's colour, walks it to its file
   expect(sub.style.opacity).toBe("0");
   vi.advanceTimersByTime(400);
   expect(spriteOf(screen.container, "sub")).toBeNull();
-  // The working sprite's beat predates the fake clock, so this counts walk frames only.
-  expect(vi.getTimerCount()).toBe(0);
+  // The working parent's beat is the one timer left: no walk frame, no fade.
+  expect(vi.getTimerCount()).toBe(1);
 });
 
 it("keeps a sprite in place when its path goes null and stands a fileless subagent at its parent", async () => {
@@ -201,10 +205,14 @@ it("stands a thread with no file at the dock and walks it off once a file names 
 
 it("stands on every file of a fast burst in order and lands on the last one soon after it", async () => {
   const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
+  // Mounted empty so the shared beat starts under the fake clock.
   await using screen = await render(
-    <CodeMapSprites sprites={[agent(A)]} world={world} camera={camera} {...idle} />,
+    <CodeMapSprites sprites={[]} world={world} camera={camera} {...idle} />,
   );
   using _clock = fakeTimers();
+  await screen.rerender(
+    <CodeMapSprites sprites={[agent(A)]} world={world} camera={camera} {...idle} />,
+  );
   const root = spriteOf(screen.container, "root")!;
   const stood: string[] = [];
   const said: string[] = [];
@@ -232,8 +240,8 @@ it("stands on every file of a fast burst in order and lands on the last one soon
   expect(said).toEqual(["Edit ChatView.tsx", "Edit index.css"]);
   expect(root.firstElementChild!.className).not.toContain("code-map-walk");
   expect(root.dataset.look).toBeUndefined();
-  // The working sprite's beat predates the fake clock, so this counts walk frames only.
-  expect(vi.getTimerCount()).toBe(0);
+  // The working sprite's beat is the one timer left: no walk frame.
+  expect(vi.getTimerCount()).toBe(1);
 });
 
 const inState = (state: SpriteInput["state"]): SpriteInput => ({ ...agent(A), state });
