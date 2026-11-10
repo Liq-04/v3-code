@@ -66,6 +66,7 @@ export function resolveThreadListV2ProviderDrivers(
 export type ThreadListV2Status =
   | "approval"
   | "input"
+  | "call"
   | "request"
   | "working"
   | "waiting"
@@ -264,6 +265,7 @@ export function resolveThreadListV2Status(
     | "hasPendingUserInput"
     | "pendingSubagentRequest"
     | "pendingGuestMessageCount"
+    | "discussion"
     | "runtime"
     | "blockedOnThreadWait"
   >,
@@ -273,6 +275,10 @@ export function resolveThreadListV2Status(
   }
   if (thread.hasPendingUserInput || thread.pendingSubagentRequest === "user_input") {
     return "input";
+  }
+  // The call's turns start and stop, so the row says it is on a call instead of flickering.
+  if (thread.discussion != null) {
+    return "call";
   }
   // A guest is waiting on the owner; the agent's own requests come first.
   if ((thread.pendingGuestMessageCount ?? 0) > 0) {
