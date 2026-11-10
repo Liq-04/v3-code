@@ -32,7 +32,8 @@ import { buildThreadRouteParams } from "~/threadRoutes";
 
 import { CodeMapBasePicker } from "./CodeMapBasePicker";
 import { CodeMapCanvas, markView, type MapScope } from "./CodeMapCanvas";
-import { CodeMapSprites, type SpriteInput } from "./CodeMapSprites";
+import { CodeMapSpriteCard, spriteStatus, threadChanges } from "./CodeMapSpriteCard";
+import { CodeMapSprites, type SpriteHover, type SpriteInput } from "./CodeMapSprites";
 import {
   hoverCodeMapPath,
   useCodeMapFocusStore,
@@ -133,6 +134,7 @@ function toSpriteInput(
     color: colorOf(sprite.colorThreadId),
     quiet: scope === "thread" && sprite.threadId !== threadId && sprite.colorThreadId !== threadId,
     title: titleOf(sprite.threadId),
+    state: sprite.state,
   };
 }
 
@@ -170,6 +172,7 @@ function CodeMapStage(props: {
   const [layoutBox, setLayoutBox] = useState(NO_SIZE);
   const [cache, setCache] = useState<WorldCache | null>(null);
   const [standingByThread, setStandingByThread] = useState(NO_PATHS);
+  const [spriteHover, setSpriteHover] = useState<SpriteHover | null>(null);
 
   const titleOf = (threadId: ThreadId) => view.threadTitles.get(threadId) || "Untitled thread";
 
@@ -241,13 +244,21 @@ function CodeMapStage(props: {
     return path ? [{ path, threadId: sprite.colorThreadId }] : [];
   });
 
+  const hoveredSprite = spriteHover
+    ? model.sprites.find((sprite) => sprite.threadId === spriteHover.threadId)
+    : undefined;
+
+  const openThread = (threadId: ThreadId) => {
+    void router.navigate({
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(scopeThreadRef(threadRef.environmentId, threadId)),
+    });
+  };
+
   const open = (path: string) => {
     const mark = marksByPath.get(path);
     if (mark && mark.kind === "other") {
-      void router.navigate({
-        to: "/$environmentId/$threadId",
-        params: buildThreadRouteParams(scopeThreadRef(threadRef.environmentId, mark.threadId)),
-      });
+      openThread(mark.threadId);
       return;
     }
     useRightPanelStore.getState().openFile(threadRef, path);
@@ -311,7 +322,26 @@ function CodeMapStage(props: {
           onHover={hoverCodeMapPath}
           onManualPanZoom={() => setFollow(false)}
         />
-        <CodeMapSprites sprites={sprites} world={world} camera={camera} />
+        <CodeMapSprites
+          sprites={sprites}
+          world={world}
+          camera={camera}
+          onHover={setSpriteHover}
+          onOpen={openThread}
+        />
+        {spriteHover && hoveredSprite ? (
+          <CodeMapSpriteCard
+            anchor={spriteHover.rect}
+            bounds={box}
+            title={titleOf(hoveredSprite.threadId)}
+            projectName={view.threadProjectNames.get(hoveredSprite.threadId) ?? null}
+            status={spriteStatus(hoveredSprite)}
+            changes={threadChanges(model.marks, hoveredSprite.threadId)}
+            parentTitle={
+              hoveredSprite.parentThreadId === null ? null : titleOf(hoveredSprite.parentThreadId)
+            }
+          />
+        ) : null}
       </div>
     </div>
   );

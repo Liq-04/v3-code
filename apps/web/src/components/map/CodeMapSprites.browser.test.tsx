@@ -30,6 +30,7 @@ const agent = (path: string | null): SpriteInput => ({
   color: "rgb(10, 20, 30)",
   quiet: false,
   title: "Root",
+  state: "working",
 });
 
 const subagent = (path: string | null): SpriteInput => ({
@@ -41,7 +42,10 @@ const subagent = (path: string | null): SpriteInput => ({
   color: "rgb(10, 20, 30)",
   quiet: false,
   title: "Explore",
+  state: "working",
 });
+
+const idle = { onHover: () => {}, onOpen: () => {} };
 
 const spriteOf = (container: HTMLElement, id: string) =>
   container.querySelector<HTMLElement>(`[data-testid="code-map-sprite"][data-thread-id="${id}"]`);
@@ -50,13 +54,13 @@ const translateX = (el: HTMLElement) => Number(el.style.transform.match(/-?[\d.]
 it("spawns a subagent at its parent in the parent's colour, walks it to its file, and walks it home when it finishes", async () => {
   const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
   await using screen = await render(
-    <CodeMapSprites sprites={[agent(A)]} world={world} camera={camera} />,
+    <CodeMapSprites sprites={[agent(A)]} world={world} camera={camera} {...idle} />,
   );
   using _clock = fakeTimers();
   const parentX = translateX(spriteOf(screen.container, "root")!);
 
   await screen.rerender(
-    <CodeMapSprites sprites={[agent(A), subagent(B)]} world={world} camera={camera} />,
+    <CodeMapSprites sprites={[agent(A), subagent(B)]} world={world} camera={camera} {...idle} />,
   );
   const sub = spriteOf(screen.container, "sub")!;
   expect(sub.dataset.kind).toBe("subagent");
@@ -71,7 +75,9 @@ it("spawns a subagent at its parent in the parent's colour, walks it to its file
   expect(sub.querySelector('[data-testid="code-map-say"]')).toHaveTextContent("Read git.ts");
   expect(vi.getTimerCount()).toBe(0);
 
-  await screen.rerender(<CodeMapSprites sprites={[agent(A)]} world={world} camera={camera} />);
+  await screen.rerender(
+    <CodeMapSprites sprites={[agent(A)]} world={world} camera={camera} {...idle} />,
+  );
   expect(sub.firstElementChild!.className).toContain("code-map-walk");
   vi.advanceTimersByTime(2000);
   expect(translateX(sub)).toBe(parentX);
@@ -84,7 +90,7 @@ it("spawns a subagent at its parent in the parent's colour, walks it to its file
 it("keeps a sprite in place when its path goes null and stands a fileless subagent at its parent", async () => {
   const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
   await using screen = await render(
-    <CodeMapSprites sprites={[agent(A), subagent(null)]} world={world} camera={camera} />,
+    <CodeMapSprites sprites={[agent(A), subagent(null)]} world={world} camera={camera} {...idle} />,
   );
   const root = spriteOf(screen.container, "root")!;
   const placed = root.style.transform;
@@ -92,7 +98,12 @@ it("keeps a sprite in place when its path goes null and stands a fileless subage
   expect(spriteOf(screen.container, "sub")!.style.transform).toBe(placed);
 
   await screen.rerender(
-    <CodeMapSprites sprites={[agent(null), subagent(null)]} world={world} camera={camera} />,
+    <CodeMapSprites
+      sprites={[agent(null), subagent(null)]}
+      world={world}
+      camera={camera}
+      {...idle}
+    />,
   );
   expect(root.style.transform).toBe(placed);
   expect(root.dataset.path).toBe(A);
@@ -102,7 +113,7 @@ it("keeps a sprite in place when its path goes null and stands a fileless subage
 it("repositions sprites when the camera moves without restarting a walk", async () => {
   const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
   await using screen = await render(
-    <CodeMapSprites sprites={[agent(A)]} world={world} camera={camera} />,
+    <CodeMapSprites sprites={[agent(A)]} world={world} camera={camera} {...idle} />,
   );
   const root = spriteOf(screen.container, "root")!;
   const x = translateX(root);

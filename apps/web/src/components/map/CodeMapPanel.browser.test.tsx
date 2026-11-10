@@ -283,6 +283,34 @@ it("draws a sprite for each running thread and none for a finished one", async (
   expect(cell(screen, GIT).dataset.strength).toBe("faint");
 });
 
+it("shows a stopped thread's card on hover and opens the thread on click", async () => {
+  using context = setup(
+    view(
+      [
+        thread("a", { running: true, active: CHAT_VIEW }),
+        thread("b", { finished: true, active: GIT }),
+      ],
+      twoChanges,
+    ),
+  );
+  await using screen = await render(context.ui, { container: context.container });
+  using navigate = vi.spyOn(screen.router!, "navigate").mockResolvedValue(undefined);
+  const stopped = sprite(screen, "b")!;
+  expect(stopped.dataset.state).toBe("idle");
+  expect(stopped.querySelector('[data-testid="code-map-say"]')).toBeNull();
+
+  await userEvent.hover(stopped);
+  const card = screen.getByRole("tooltip");
+  await expect.element(card).toMatchTextContent(/Checkpoint diff stalls.*Idle · last at git\.ts/);
+  await userEvent.unhover(stopped);
+  await expect.element(card).not.toBeInTheDocument();
+
+  await userEvent.click(stopped);
+  expect(navigate).toHaveBeenCalledWith(
+    expect.objectContaining({ params: expect.objectContaining({ threadId: "b" }) }),
+  );
+});
+
 it("walks the sprite to its new file, stops requesting frames, and stays when the path goes quiet", async () => {
   using context = setup(twoThreads());
   await using screen = await render(context.ui, { container: context.container });
