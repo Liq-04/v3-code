@@ -77,6 +77,7 @@ function thread(
     settled?: boolean;
     snoozedUntil?: string;
     waiting?: boolean;
+    toolRunning?: boolean;
     active?: { path: string; op: "read" | "edit"; at?: string };
   } = {},
 ): CodeMapThreadInput {
@@ -122,6 +123,7 @@ function thread(
       activityRunStatus: null,
       pendingRuntimeRequest: null,
       pendingBackgroundTasks: [],
+      ...(opts.toolRunning === undefined ? {} : { toolRunning: opts.toolRunning }),
       activeFile: opts.active && {
         path: opts.active.path,
         op: opts.active.op,
@@ -314,6 +316,32 @@ describe("deriveCodeMap", () => {
     ]);
     expect(model.sprites.find((sprite) => sprite.threadId === "nowhere")?.home).toBe(CODE_MAP_DOCK);
     expect(model.threads).toEqual([]);
+  });
+
+  it("shows a working thread or subagent with no tool running as thinking and keeps its reads", () => {
+    const READ = `/wt/thinks/${ORCH}`;
+    const model = derive(
+      [
+        thread("thinks", { worktree: "/wt/thinks", running: true, toolRunning: false }),
+        thread("tools", { worktree: "/wt/tools", running: true, toolRunning: true }),
+        // An older server says nothing about tools.
+        thread("older", { worktree: "/wt/older", running: true }),
+        thread("asks", { worktree: "/wt/asks", running: true, waiting: true, toolRunning: false }),
+        thread("stopped", { worktree: "/wt/stopped", toolRunning: false }),
+        thread("child", { subagentOf: "thinks", running: true, toolRunning: false }),
+      ],
+      {},
+      { backfilledReads: new Map([[ThreadId.make("thinks"), [READ]]]) },
+    );
+    expect(model.sprites.map((sprite) => [sprite.threadId, sprite.state])).toEqual([
+      ["thinks", "thinking"],
+      ["tools", "working"],
+      ["older", "working"],
+      ["asks", "waiting"],
+      ["stopped", "idle"],
+      ["child", "thinking"],
+    ]);
+    expect(model.reads).toEqual([{ path: ORCH, threadIds: ids("thinks") }]);
   });
 
   it("stands a thread whose last file is outside every checkout on its busiest change", () => {

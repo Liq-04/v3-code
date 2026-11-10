@@ -73,8 +73,11 @@ export interface CodeMapSprite {
    */
   readonly home: string | null;
   readonly op: "read" | "edit" | null;
-  /** Waiting is on the user: an approval, a question, or a plan to accept. Subagents only work. */
-  readonly state: "working" | "waiting" | "idle";
+  /**
+   * Working runs a tool; thinking works with none in flight. Waiting is on the user: an approval,
+   * a question, or a plan to accept. Subagents only work or think.
+   */
+  readonly state: "working" | "thinking" | "waiting" | "idle";
 }
 
 /** The repository root: where a thread that names no file of the map yet stands. */
@@ -133,6 +136,7 @@ export type CodeMapThreadInput = Pick<
     | "activityRunStatus"
     | "pendingRuntimeRequest"
     | "pendingBackgroundTasks"
+    | "toolRunning"
   >;
 };
 
@@ -250,9 +254,15 @@ interface CodeMapActor {
   readonly state: CodeMapSprite["state"];
 }
 
+// An older server names no tool state, which reads as working.
+const busyStateOf = (thread: CodeMapThreadInput) =>
+  thread.source.toolRunning === false ? "thinking" : "working";
+
+const isBusy = (state: CodeMapSprite["state"]) => state === "working" || state === "thinking";
+
 /** Null for a parked thread: settled or snoozed, the sidebar's rule. A working one is never parked. */
 function spriteStateOf(thread: CodeMapThreadInput, now: string): CodeMapSprite["state"] | null {
-  if (isThreadWorking(thread)) return "working";
+  if (isThreadWorking(thread)) return busyStateOf(thread);
   if (thread.settledOverride === "settled" || effectiveSnoozed(thread, { now })) return null;
   const waiting =
     thread.hasPendingApprovals ||
@@ -277,7 +287,7 @@ function collectActors(
           kind: "subagent",
           parentThreadId: rootId,
           colorThreadId: rootId,
-          state: "working",
+          state: busyStateOf(thread),
         });
       }
       continue;
@@ -415,7 +425,7 @@ export function deriveCodeMap(input: DeriveCodeMapInput): CodeMap {
     const path = active ? checkoutRelativePath(active.path, roots) : null;
     const home = busiest.get(thread.id)?.path ?? (kind === "agent" ? CODE_MAP_DOCK : null);
     // A thread that stopped has nowhere to stand until a file of the map names its place.
-    if (state !== "working" && path === null && home === null) continue;
+    if (!isBusy(state) && path === null && home === null) continue;
     sprites.push({
       threadId: thread.id,
       kind,
@@ -426,7 +436,7 @@ export function deriveCodeMap(input: DeriveCodeMapInput): CodeMap {
       op: active?.op ?? null,
       state,
     });
-    if (state !== "working") continue;
+    if (!isBusy(state)) continue;
     const observed = input.observedReads.get(thread.id);
     const trail = [
       ...(input.backfilledReads.get(thread.id) ?? []),

@@ -18,9 +18,10 @@ export interface SpriteCardChanges {
 
 export function spriteStatus(sprite: Pick<CodeMapSprite, "state" | "op" | "path">): string {
   if (sprite.state === "waiting") return "Needs your input";
-  if (sprite.path === null) return "Working";
+  if (sprite.path === null) return sprite.state === "thinking" ? "Thinking" : "Working";
   const name = sprite.path.slice(sprite.path.lastIndexOf("/") + 1);
   if (sprite.state === "idle") return `Idle · last at ${name}`;
+  if (sprite.state === "thinking") return `Thinking · last at ${name}`;
   return `Working · ${sprite.op === "edit" ? "Editing" : "Reading"} ${name}`;
 }
 
