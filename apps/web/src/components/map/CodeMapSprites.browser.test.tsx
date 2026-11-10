@@ -72,7 +72,6 @@ const anchorsOf = (laidOut: typeof world) =>
     x: file.x + file.w / 2,
     y: file.y + Math.min(file.h * 0.35, 12),
   }));
-/** The file whose anchor the sprite is exactly on, or null while it is anywhere else. */
 const standingOn = (el: HTMLElement, laidOut = world) => {
   const at = positionOf(el);
   const on = anchorsOf(laidOut).find(
@@ -80,7 +79,6 @@ const standingOn = (el: HTMLElement, laidOut = world) => {
   );
   return on?.path ?? null;
 };
-/** A fixed sequence, so strolls head every which way the same on each run. */
 const seeded = (seed: number) => () => (seed = (seed * 16807) % 2147483647) / 2147483647;
 
 it("spawns a subagent at its parent in the parent's colour, walks it to its file, and walks it home when it finishes", async () => {

@@ -20,7 +20,6 @@ export interface SpriteInput {
   readonly idleSince: number | null;
 }
 
-/** A sprite whose turn just ended is awake for a while; idle is asleep. */
 type Mood = CodeMapSprite["state"] | "awake";
 
 export interface SpriteHover {
@@ -64,10 +63,7 @@ interface Walker {
   readonly body: HTMLDivElement;
   input: SpriteInput;
   worldPos: Point | null;
-  /**
-   * Where the sprite ends up once `stops` drains. The world anchored it when it was named; a
-   * later layout may not.
-   */
+  /** Where the sprite ends up once `stops` drains. */
   place: CodeMapPlace | null;
   leg: Leg | null;
   /** Paths named while a leg was in flight, visited in order. */
@@ -77,13 +73,10 @@ interface Walker {
   pathChangedAt: number | null;
   pose: Animation | null;
   mood: Mood;
-  /** When an idle walker falls asleep, on this client's clock. */
   awakeUntil: number;
   /** Offsets this walker's blinks and taps on the shared beat so sprites do not move in step. */
   readonly phase: number;
-  /** The beat its mood counts from: waiting hops every so often after it, awake strolls once it comes. */
   cueBeat: number;
-  /** Off its place on a stroll, until a leg takes it somewhere it belongs. */
   strayed: boolean;
   leaving: boolean;
 }
@@ -283,7 +276,6 @@ function createSpriteLayer() {
   const beginHover = (walker: Walker) => {
     if (hover?.walker === walker || walker.leaving) return;
     endHover();
-    // A stroll would walk the sprite out from under its hover card.
     if (walker.strayed && walker.leg) {
       halt(walker);
       look(walker, 0, 0);
@@ -548,7 +540,6 @@ function createSpriteLayer() {
 
   const nextStrollBeat = () => beat + Math.round(between(STROLL_MIN_BEATS, STROLL_MAX_BEATS));
 
-  /** Ambles to a point near the walker's place, so a stroll never carries it off its file. */
   const stroll = (walker: Walker) => {
     walker.cueBeat = nextStrollBeat();
     const from = walker.worldPos;
@@ -566,7 +557,6 @@ function createSpriteLayer() {
     startLeg(walker, to, performance.now(), "amble", null);
   };
 
-  /** Ends a stroll where it is and walks the sprite back to its place. */
   const recall = (walker: Walker) => {
     if (!walker.strayed) return;
     halt(walker);

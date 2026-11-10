@@ -762,7 +762,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   transform: var(--code-map-eye-look) scaleX(0.82);
 }
 
-/* A run that just finished squeezes its eyes into happy arcs once. */
 .code-map-sprite[data-done] .code-map-eye {
   animation: code-map-eye-happy 600ms ease-out;
 }

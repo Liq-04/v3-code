@@ -4,10 +4,6 @@ import { useEffect, useEffectEvent } from "react";
 
 import { useRightPanelStore } from "../rightPanelStore";
 
-/**
- * Arriving at a thread opens its right panel on the pinned map, unless the panel would cover the
- * chat as a sheet. A later layout change is not an arrival, so it leaves the user's tab alone.
- */
 export function usePinnedMapReveal(threadKey: string | null, sheet: boolean) {
   const reveal = useEffectEvent((ref: ScopedThreadRef) => {
     if (!sheet) useRightPanelStore.getState().revealPinnedMap(ref);
