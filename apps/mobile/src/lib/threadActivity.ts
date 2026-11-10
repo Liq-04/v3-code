@@ -1,4 +1,4 @@
-import { discussionLineMessageIds } from "@t3tools/client-runtime/discussion";
+import { discussionFold } from "@t3tools/client-runtime/discussion";
 import type {
   ThreadPendingApproval,
   ThreadPendingUserInput,
@@ -2198,7 +2198,7 @@ export function buildThreadFeed(
   // is reused only while these match the build that produced it.
   const foldedAnswerMessageIds = new Set<string>();
   // A discussion's lines show inside its card.
-  for (const id of discussionLineMessageIds(visibleTurnItems)) foldedAnswerMessageIds.add(id);
+  for (const id of discussionFold(visibleTurnItems).messageIds) foldedAnswerMessageIds.add(id);
   const delegatedChildrenByRun = new Map<RunId, Set<string>>();
   for (const { item } of visibleTurnItems) {
     if (item.type === "user_input_request" && item.questionAnswer) {

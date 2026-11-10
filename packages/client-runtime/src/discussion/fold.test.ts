@@ -9,7 +9,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import { expect, it } from "vite-plus/test";
 
-import { discussionLineMessageIds } from "./foldedLines.ts";
+import { discussionFold } from "./fold.ts";
 
 const discussionId = DiscussionId.make("discussion-1");
 const base = (id: string, runId: string | null, second: number) => {
@@ -54,14 +54,26 @@ const assistant = (id: string, runId: string, second: number) =>
     streaming: false,
   }) satisfies OrchestrationV2TurnItem;
 
-it("folds spoken lines and the replies after them in their runs, nothing else", () => {
+const tool = (id: string, runId: string, second: number) =>
+  ({
+    ...base(id, runId, second),
+    type: "command_execution",
+    command: "ls",
+  }) as unknown as OrchestrationV2TurnItem;
+
+it("folds spoken lines and the replies and tool work after them in their runs, nothing else", () => {
   const items = [
     user("typed-1", "run-1", 0),
     assistant("before-line", "run-1", 1),
+    tool("tool-before-line", "run-1", 1),
     user("spoken-1", "run-1", 2, "check the tests"),
     assistant("after-line", "run-1", 3),
+    tool("tool-after-line", "run-1", 3),
     user("typed-2", "run-2", 4),
     assistant("typed-reply", "run-2", 5),
+    tool("typed-tool", "run-2", 5),
   ].map((item) => ({ item }));
-  expect([...discussionLineMessageIds(items)].toSorted()).toEqual(["after-line", "spoken-1"]);
+  const fold = discussionFold(items);
+  expect([...fold.messageIds].toSorted()).toEqual(["after-line", "spoken-1"]);
+  expect([...fold.toolItems]).toEqual([["tool-after-line", discussionId]]);
 });

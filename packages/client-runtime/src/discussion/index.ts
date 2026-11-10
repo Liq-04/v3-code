@@ -9,4 +9,4 @@ export {
   type DuplexAudio,
 } from "./controller.ts";
 export { getEnvironmentDiscussionStreamUrl } from "./environment.ts";
-export { discussionLineMessageIds } from "./foldedLines.ts";
+export { discussionFold, type DiscussionFold } from "./fold.ts";

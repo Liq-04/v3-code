@@ -60,7 +60,7 @@ function TranscriptLines({
 /**
  * A voice discussion in the timeline. While live it shows the call's lines; once over, the summary
  * with the transcript behind a disclosure. The lines are the thread's own messages, which the
- * timeline leaves out (`discussionLineMessageIds`).
+ * timeline leaves out (`discussionFold`).
  */
 export function DiscussionTimelineRow({
   environmentId,

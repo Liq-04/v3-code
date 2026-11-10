@@ -1,4 +1,4 @@
-import { discussionLineMessageIds } from "@t3tools/client-runtime/discussion";
+import { discussionFold } from "@t3tools/client-runtime/discussion";
 import { useState } from "react";
 import {
   deriveTimelineEntriesFromVisibleTurnItemsWithState,
@@ -23,7 +23,7 @@ function withoutDiscussionLines(
   input: TimelineEntriesInput,
   entries: TimelineEntriesProjection["entries"],
 ): TimelineEntriesProjection["entries"] {
-  const folded = discussionLineMessageIds(input.visibleTurnItems);
+  const folded = discussionFold(input.visibleTurnItems).messageIds;
   if (folded.size === 0) return entries;
   return entries.filter((entry) => entry.kind !== "message" || !folded.has(entry.id));
 }
