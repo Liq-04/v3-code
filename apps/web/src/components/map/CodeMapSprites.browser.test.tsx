@@ -62,17 +62,26 @@ const idle = { onHover: () => {}, onOpen: () => {} };
 const spriteOf = (container: HTMLElement, id: string) =>
   container.querySelector<HTMLElement>(`[data-testid="code-map-sprite"][data-thread-id="${id}"]`);
 const translateX = (el: HTMLElement) => Number(el.style.transform.match(/-?[\d.]+/)![0]);
-/** The file whose anchor the sprite is exactly on, or null while it travels between files. */
-const standingOn = (el: HTMLElement) => {
+const positionOf = (el: HTMLElement) => {
   const [x, y] = [...el.style.transform.matchAll(/-?[\d.]+/g)].map(Number);
-  for (const file of world.files.values()) {
-    const anchorY = file.y + Math.min(file.h * 0.35, 12);
-    if (Math.abs(x! - (file.x + file.w / 2)) < 0.01 && Math.abs(y! - anchorY) < 0.01) {
-      return file.path;
-    }
-  }
-  return null;
+  return { x: x!, y: y! };
 };
+const anchorsOf = (laidOut: typeof world) =>
+  [...laidOut.files.values()].map((file) => ({
+    path: file.path,
+    x: file.x + file.w / 2,
+    y: file.y + Math.min(file.h * 0.35, 12),
+  }));
+/** The file whose anchor the sprite is exactly on, or null while it is anywhere else. */
+const standingOn = (el: HTMLElement, laidOut = world) => {
+  const at = positionOf(el);
+  const on = anchorsOf(laidOut).find(
+    (anchor) => Math.abs(at.x - anchor.x) < 0.01 && Math.abs(at.y - anchor.y) < 0.01,
+  );
+  return on?.path ?? null;
+};
+/** A fixed sequence, so strolls head every which way the same on each run. */
+const seeded = (seed: number) => () => (seed = (seed * 16807) % 2147483647) / 2147483647;
 
 it("spawns a subagent at its parent in the parent's colour, walks it to its file, and walks it home when it finishes", async () => {
   const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
@@ -350,6 +359,7 @@ it("holds the thinking cloud back while files keep coming and shows it once they
 });
 
 const AWAKE_MS = 5 * 60_000;
+const STROLL_MAX_PX = 90;
 const NOW = Date.parse("2026-06-01T12:00:00.000Z");
 const rested = (endedAgoMs: number): SpriteInput => ({
   ...agent(A),
@@ -357,7 +367,7 @@ const rested = (endedAgoMs: number): SpriteInput => ({
   idleSince: NOW - endedAgoMs,
 });
 
-it("strolls an idle sprite whose turn just ended without moving its place, and walks it back to work", async () => {
+it("strolls an idle sprite whose turn just ended without moving its place, walks it back to work, and straight to a new file", async () => {
   const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
   await using screen = await render(
     <CodeMapSprites sprites={[]} world={world} camera={camera} {...idle} />,
@@ -396,34 +406,65 @@ it("strolls an idle sprite whose turn just ended without moving its place, and w
   vi.advanceTimersByTime(2000);
   expect(root.dataset.state).toBe("working");
   expect(standingOn(root)).toBe(A);
+
+  await screen.rerender(
+    <CodeMapSprites sprites={[rested(-12_500)]} world={world} camera={camera} {...idle} />,
+  );
+  vi.advanceTimersByTime(8300);
+  expect(body.className).toContain("code-map-walk");
+  await screen.rerender(
+    <CodeMapSprites sprites={[agent(B)]} world={world} camera={camera} {...idle} />,
+  );
+  const stood = new Set<string>();
+  const saidOnLanding: Array<string | undefined> = [];
+  for (let elapsed = 0; elapsed < 2000; elapsed += 4) {
+    vi.advanceTimersByTime(4);
+    const path = standingOn(root);
+    if (path === null) continue;
+    if (!stood.has(path)) {
+      saidOnLanding.push(root.querySelector('[data-testid="code-map-say"]')?.textContent);
+    }
+    stood.add(path);
+  }
+  expect([...stood]).toEqual([B]);
+  expect(saidOnLanding).toEqual(["Edit git.ts"]);
 });
 
-it("puts an awake idle sprite back on its file when the map is laid out again, and to sleep after 5 minutes", async () => {
+it("strolls an awake idle sprite around its file, puts it back when the map is laid out again, and home to sleep after 5 minutes", async () => {
   const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
   await using screen = await render(
     <CodeMapSprites sprites={[]} world={world} camera={camera} {...idle} />,
   );
   using _clock = fakeTimers({ now: NOW });
-  using _random = vi.spyOn(Math, "random").mockReturnValue(0);
+  using _random = vi.spyOn(Math, "random").mockImplementation(seeded(7));
   const sprite = rested(60_000);
   await screen.rerender(
     <CodeMapSprites sprites={[sprite]} world={world} camera={camera} {...idle} />,
   );
   const root = spriteOf(screen.container, "root")!;
-  vi.advanceTimersByTime(10_000);
+  vi.advanceTimersByTime(16_000);
   expect(standingOn(root)).toBeNull();
 
   await screen.rerender(
     <CodeMapSprites sprites={[sprite]} world={resized} camera={camera} {...idle} />,
   );
-  const file = rectOf(resized, A)!;
-  expect(translateX(root)).toBeCloseTo(file.x + file.w / 2, 2);
+  expect(standingOn(root, resized)).toBe(A);
 
-  vi.advanceTimersByTime(AWAKE_MS - 60_000 - 10_000 - 500);
+  const home = anchorsOf(resized).find((anchor) => anchor.path === A)!;
+  let farthest = 0;
+  for (let left = AWAKE_MS - 60_000 - 16_000 - 500; left > 0; left -= 500) {
+    vi.advanceTimersByTime(500);
+    const at = positionOf(root);
+    farthest = Math.max(farthest, Math.hypot(at.x - home.x, at.y - home.y));
+  }
   expect(root.dataset.state).toBe("awake");
-  expect(vi.getTimerCount()).toBeGreaterThan(0);
+  expect(farthest).toBeGreaterThan(STROLL_MAX_PX / 2);
+  expect(farthest).toBeLessThan(STROLL_MAX_PX + 0.01);
+
   vi.advanceTimersByTime(2500);
   expect(root.dataset.state).toBe("idle");
+  expect(standingOn(root, resized)).toBe(A);
+  expect(root.dataset.path).toBe(A);
   expect(vi.getTimerCount()).toBe(0);
 });
 

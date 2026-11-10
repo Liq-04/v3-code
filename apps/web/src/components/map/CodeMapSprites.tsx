@@ -78,6 +78,7 @@ interface Walker {
   /** The beat on which the walker entered its mood. */
   moodBeat: number;
   strollBeat: number;
+  /** Off its place on a stroll, until a leg takes it somewhere it belongs. */
   strayed: boolean;
   leaving: boolean;
 }
@@ -342,9 +343,8 @@ function createSpriteLayer() {
       if (walker.el.dataset.busy !== undefined && !walker.leg && settled) {
         delete walker.el.dataset.busy;
       }
-      const mood = moodOf(walker.input, wallNow);
-      if (mood !== walker.mood) paintMood(walker, mood);
-      if (!still && !walker.leaving && mood !== "asleep") act(walker);
+      refreshMood(walker, wallNow);
+      if (!still && !walker.leaving && walker.mood !== "asleep") act(walker);
     }
     syncBeat();
   };
@@ -429,6 +429,7 @@ function createSpriteLayer() {
   ): Leg | null => {
     if (!camera) return null;
     endHover(walker);
+    walker.strayed = gait === "amble";
     const interrupted = walker.leg !== null;
     const from = walker.worldPos ?? to;
     walker.worldPos = from;
@@ -515,7 +516,7 @@ function createSpriteLayer() {
     walker.stops.push(stop);
     if (walker.stops.length > MAX_STOPS) walker.stops.shift();
     const leg = walker.leg;
-    if (!leg) {
+    if (!leg || walker.strayed) {
       depart(walker, now);
       return;
     }
@@ -528,21 +529,31 @@ function createSpriteLayer() {
 
   const nextStrollBeat = () => beat + Math.round(between(STROLL_MIN_BEATS, STROLL_MAX_BEATS));
 
+  /** Ambles to a point near the walker's place, so a stroll never carries it off its file. */
   const stroll = (walker: Walker) => {
     walker.strollBeat = nextStrollBeat();
     const from = walker.worldPos;
-    if (!world || !camera || !from || walker.leg || hover?.walker === walker) return;
+    const home = walker.place && anchor(walker, walker.place);
+    if (!world || !camera || !from || !home || walker.leg || hover?.walker === walker) return;
     const { scale } = camera.get();
     const angle = between(0, Math.PI * 2);
     const reach = between(STROLL_MIN_PX, STROLL_MAX_PX) / scale;
     const edge = STROLL_EDGE_PX / scale;
     const to = {
-      x: clamp(from.x + Math.cos(angle) * reach, edge, world.width - edge),
-      y: clamp(from.y + Math.sin(angle) * reach, edge, world.height - edge),
+      x: clamp(home.x + Math.cos(angle) * reach, edge, world.width - edge),
+      y: clamp(home.y + Math.sin(angle) * reach, edge, world.height - edge),
     };
     if (Math.hypot(to.x - from.x, to.y - from.y) * scale < STROLL_MIN_PX / 2) return;
-    walker.strayed = true;
     startLeg(walker, to, performance.now(), "amble", null);
+  };
+
+  /** Ends a stroll where it is and walks the sprite back to its place. */
+  const recall = (walker: Walker) => {
+    if (!walker.strayed) return;
+    halt(walker);
+    walker.strayed = false;
+    const home = walker.place && anchor(walker, walker.place);
+    if (home) startLeg(walker, home, performance.now(), "walk", null);
   };
 
   const remove = (walker: Walker) => {
@@ -562,8 +573,9 @@ function createSpriteLayer() {
   };
 
   // index.css draws each mood's eyes and cloud from these attributes. Asleep paints as idle.
-  const paintMood = (walker: Walker, mood: Mood) => {
+  const setMood = (walker: Walker, mood: Mood) => {
     const { el, body } = walker;
+    if (walker.mood === "awake") recall(walker);
     const finished = walker.mood === "working" || walker.mood === "thinking";
     walker.mood = mood;
     el.dataset.state = mood === "asleep" ? "idle" : mood;
@@ -580,12 +592,16 @@ function createSpriteLayer() {
     hop(walker);
   };
 
+  const refreshMood = (walker: Walker, now: number) => {
+    const mood = moodOf(walker.input, now);
+    if (mood !== walker.mood) setMood(walker, mood);
+  };
+
   const speaks = (input: SpriteInput) => !input.quiet && input.state !== "idle";
 
   const apply = (walker: Walker, input: SpriteInput) => {
     walker.input = input;
-    const mood = moodOf(input, Date.now());
-    if (walker.mood !== mood) paintMood(walker, mood);
+    refreshMood(walker, Date.now());
     walker.body.style.background = input.color;
     walker.el.style.setProperty("--code-map-color", input.color);
     walker.el.classList.toggle("opacity-50", input.quiet);
@@ -627,7 +643,7 @@ function createSpriteLayer() {
     walkers.set(input.threadId, walker);
     listen(walker);
     container?.appendChild(el);
-    paintMood(walker, moodOf(input, Date.now()));
+    setMood(walker, moodOf(input, Date.now()));
     return walker;
   };
 
@@ -650,11 +666,6 @@ function createSpriteLayer() {
       seen.add(input.threadId);
       const existing = walkers.get(input.threadId);
       const walker = existing ?? spawn(input);
-      const returning = walker.strayed && input.state !== "idle";
-      if (returning) {
-        walker.strayed = false;
-        halt(walker);
-      }
       const named: CodeMapPlace | null =
         input.path === null ? null : { kind: "file", path: input.path };
       const to = named && !samePlace(walker.place, named) ? anchor(walker, named) : null;
@@ -676,8 +687,6 @@ function createSpriteLayer() {
         }
       }
       walker.worldPos ??= besideParent(input);
-      const back = returning && !walker.leg && walker.place ? anchor(walker, walker.place) : null;
-      if (back) startLeg(walker, back, performance.now(), "walk", null);
       apply(walker, input);
       project(walker);
     }
