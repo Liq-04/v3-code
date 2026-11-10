@@ -123,6 +123,8 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("discussion-summary.generate"),
     discussionId: DiscussionId,
+    /** The user hung up, so the agent first gets a turn to act on the call. */
+    act: Schema.optional(Schema.Boolean),
   }),
 ]);
 export type OrchestrationEffectRequestV2 = typeof OrchestrationEffectRequestV2.Type;
