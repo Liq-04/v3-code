@@ -187,6 +187,75 @@ function createElement(input: SpriteInput): { el: HTMLDivElement; body: HTMLDivE
   return { el, body };
 }
 
+/** Turns the eyes toward a screen direction, or back to their state's expression for none. */
+const look = (walker: Walker, dx: number, dy: number) => {
+  const { el } = walker;
+  const distance = Math.hypot(dx, dy);
+  if (distance === 0) {
+    delete el.dataset.look;
+    return;
+  }
+  el.style.setProperty("--code-map-look-x", String(dx / distance));
+  el.style.setProperty("--code-map-look-y", String(dy / distance));
+  el.dataset.look = Math.abs(dx) < distance * 0.3 ? "straight" : dx < 0 ? "left" : "right";
+};
+
+// These animate `scale` and `translate`, which compose with the transforms CSS and walks own.
+const blink = (walker: Walker) => {
+  for (const eye of walker.body.querySelectorAll("i")) {
+    eye.animate({ scale: ["1 1", "1 0.1", "1 1"] }, { duration: 140 });
+  }
+};
+
+const tap = (walker: Walker) =>
+  walker.body.animate(
+    { scale: ["1 1", "1.06 0.9", "1 1"] },
+    { duration: 220, easing: "ease-in-out" },
+  );
+
+const hop = (walker: Walker) => {
+  if (!reducedMotion()) {
+    walker.body.animate(HOP_KEYFRAMES, { duration: 620, easing: "ease-in-out" });
+  }
+};
+
+const strike = (walker: Walker, pose: Animation | null) => {
+  walker.pose?.cancel();
+  walker.pose = pose;
+};
+
+const halt = (walker: Walker) => {
+  walker.leg = null;
+  strike(walker, null);
+  walker.body.classList.remove("code-map-walk");
+};
+
+const say = (walker: Walker, text: string) => {
+  walker.el.querySelector("[data-testid=code-map-say]")?.remove();
+  const bubble = document.createElement("div");
+  bubble.dataset.testid = "code-map-say";
+  bubble.className = `code-map-say pointer-events-none absolute left-full whitespace-nowrap rounded-sm border border-border bg-popover text-popover-foreground ${
+    walker.input.kind === "agent"
+      ? "top-0 ml-1.5 px-1.5 py-px text-3xs"
+      : "-top-[3px] ml-0.5 px-1 text-4xs"
+  }`;
+  bubble.textContent = text;
+  walker.el.appendChild(bubble);
+};
+
+/** How long a leg may take before the next path is likely to land. Null before a pace is known. */
+const legBudget = (walker: Walker) =>
+  walker.paceMs === null
+    ? null
+    : Math.max(MIN_LEG_MS, walker.paceMs * (walker.stops.length > 0 ? 0.55 : 0.8));
+
+const speaks = (input: SpriteInput) => !input.quiet && input.state !== "idle";
+
+const bubbleText = (input: SpriteInput, path: string) => {
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  return input.verb ? `${input.verb} ${name}` : name;
+};
+
 function createSpriteLayer() {
   let container: HTMLElement | null = null;
   let camera: CameraStore | null = null;
@@ -302,38 +371,6 @@ function createSpriteLayer() {
     if (moving) tick();
   };
 
-  /** Turns the eyes toward a screen direction, or back to their state's expression for none. */
-  const look = (walker: Walker, dx: number, dy: number) => {
-    const { el } = walker;
-    const distance = Math.hypot(dx, dy);
-    if (distance === 0) {
-      delete el.dataset.look;
-      return;
-    }
-    el.style.setProperty("--code-map-look-x", String(dx / distance));
-    el.style.setProperty("--code-map-look-y", String(dy / distance));
-    el.dataset.look = Math.abs(dx) < distance * 0.3 ? "straight" : dx < 0 ? "left" : "right";
-  };
-
-  // These animate `scale` and `translate`, which compose with the transforms CSS and walks own.
-  const blink = (walker: Walker) => {
-    for (const eye of walker.body.querySelectorAll("i")) {
-      eye.animate({ scale: ["1 1", "1 0.1", "1 1"] }, { duration: 140 });
-    }
-  };
-
-  const tap = (walker: Walker) =>
-    walker.body.animate(
-      { scale: ["1 1", "1.06 0.9", "1 1"] },
-      { duration: 220, easing: "ease-in-out" },
-    );
-
-  const hop = (walker: Walker) => {
-    if (!reducedMotion()) {
-      walker.body.animate(HOP_KEYFRAMES, { duration: 620, easing: "ease-in-out" });
-    }
-  };
-
   const act = (walker: Walker) => {
     const { mood } = walker;
     const own = beat + walker.phase;
@@ -375,17 +412,6 @@ function createSpriteLayer() {
     }
   };
 
-  const strike = (walker: Walker, pose: Animation | null) => {
-    walker.pose?.cancel();
-    walker.pose = pose;
-  };
-
-  const halt = (walker: Walker) => {
-    walker.leg = null;
-    strike(walker, null);
-    walker.body.classList.remove("code-map-walk");
-  };
-
   const arrive = (walker: Walker, leg: Leg, now: number) => {
     halt(walker);
     walker.body.classList.remove("code-map-land");
@@ -408,25 +434,6 @@ function createSpriteLayer() {
     walker.body.classList.add("code-map-land");
     leg.onArrive?.();
   };
-
-  const say = (walker: Walker, text: string) => {
-    walker.el.querySelector("[data-testid=code-map-say]")?.remove();
-    const bubble = document.createElement("div");
-    bubble.dataset.testid = "code-map-say";
-    bubble.className = `code-map-say pointer-events-none absolute left-full whitespace-nowrap rounded-sm border border-border bg-popover text-popover-foreground ${
-      walker.input.kind === "agent"
-        ? "top-0 ml-1.5 px-1.5 py-px text-3xs"
-        : "-top-[3px] ml-0.5 px-1 text-4xs"
-    }`;
-    bubble.textContent = text;
-    walker.el.appendChild(bubble);
-  };
-
-  /** How long a leg may take before the next path is likely to land. Null before a pace is known. */
-  const legBudget = (walker: Walker) =>
-    walker.paceMs === null
-      ? null
-      : Math.max(MIN_LEG_MS, walker.paceMs * (walker.stops.length > 0 ? 0.55 : 0.8));
 
   /**
    * Starts a leg from where the walker is. A paced leg gets only the time until the next path is
@@ -608,8 +615,6 @@ function createSpriteLayer() {
     if (mood !== walker.mood) setMood(walker, mood);
   };
 
-  const speaks = (input: SpriteInput) => !input.quiet && input.state !== "idle";
-
   const apply = (walker: Walker, input: SpriteInput) => {
     const now = Date.now();
     if (input.idleSince !== walker.input.idleSince) {
@@ -624,11 +629,6 @@ function createSpriteLayer() {
     walker.el.setAttribute("aria-label", path === null ? input.title : `${input.title} at ${path}`);
     if (path !== null) walker.el.dataset.path = path;
     if (!speaks(input)) walker.el.querySelector("[data-testid=code-map-say]")?.remove();
-  };
-
-  const bubbleText = (input: SpriteInput, path: string) => {
-    const name = path.slice(path.lastIndexOf("/") + 1);
-    return input.verb ? `${input.verb} ${name}` : name;
   };
 
   const besideParent = (input: SpriteInput): Point | null =>
