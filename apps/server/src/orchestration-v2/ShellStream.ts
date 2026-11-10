@@ -431,7 +431,9 @@ export function shouldPublishShellApplicationEvent(
   }
   if (!subagentThreadIds.has(event.threadId)) return true;
   // The map still follows a subagent's tools and whether its run-less root turn is live.
-  if (event.type === "node.updated") return event.payload.kind === "root_turn";
+  if (event.type === "node.updated") {
+    return event.payload.kind === "root_turn" && event.payload.runId === null;
+  }
   if (event.type === "turn-item.updated") return isToolTurnItem(event.payload);
   return event.type !== "provider-turn.updated" && event.type !== "message.updated";
 }

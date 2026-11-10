@@ -75,6 +75,13 @@ describe("subagent shell events", () => {
         subagents,
       ),
     ).toBe(true);
+    // A root turn under a run is already heard through the run's own updates.
+    expect(
+      shouldPublishShellApplicationEvent(
+        stored("child", "node.updated", { kind: "root_turn", runId: "run:child" }),
+        subagents,
+      ),
+    ).toBe(false);
     expect(
       shouldPublishShellApplicationEvent(
         stored("child", "turn-item.updated", { type: "dynamic_tool", toolName: "Read" }),

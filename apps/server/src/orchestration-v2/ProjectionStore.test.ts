@@ -8828,10 +8828,14 @@ it.effect("a provider-native subagent's shell is live while its root turn runs",
         },
       });
     }
-    const rootNodeId = NodeId.make("node:native-child:root");
-    const setRoot = (status: "running" | "completed") =>
-      store.apply({
-        id: EventId.make(`event:native-child:root:${status}`),
+    const setRoot = (
+      name: string,
+      status: "running" | "completed",
+      startedAt: DateTime.Utc = now,
+    ) => {
+      const rootNodeId = NodeId.make(`node:native-child:${name}`);
+      return store.apply({
+        id: EventId.make(`event:native-child:${name}:${status}`),
         type: "node.updated",
         threadId: childId,
         nodeId: rootNodeId,
@@ -8851,10 +8855,11 @@ it.effect("a provider-native subagent's shell is live while its root turn runs",
           nativeItemRef: null,
           runtimeRequestId: null,
           checkpointScopeId: null,
-          startedAt: now,
+          startedAt,
           completedAt: status === "running" ? null : now,
         },
       });
+    };
     const expectActivity = Effect.fnUntraced(function* (expected: "running" | null) {
       const listed = (yield* store.getShellSnapshot()).threads.find((row) => row.id === childId);
       const memory = ProjectionStore.threadShellFromProjection(
@@ -8865,9 +8870,12 @@ it.effect("a provider-native subagent's shell is live while its root turn runs",
       }
     });
 
-    yield* setRoot("running");
+    yield* setRoot("root", "running");
     yield* expectActivity("running");
-    yield* setRoot("completed");
+    yield* setRoot("root", "completed");
+    yield* expectActivity(null);
+    // An older root turn left running does not outlive the newer one that completed.
+    yield* setRoot("stuck", "running", DateTime.subtract(now, { minutes: 1 }));
     yield* expectActivity(null);
   }).pipe(Effect.provide(layerTest)),
 );

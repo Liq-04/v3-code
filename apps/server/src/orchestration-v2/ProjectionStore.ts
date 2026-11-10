@@ -6252,7 +6252,6 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         )
       )`;
     };
-    // Mirrors isSilentRunForShell.
     const sessionCwdOf = (alias: string) => {
       const thread = sql.literal(alias);
       return sql`(
@@ -6280,6 +6279,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         )
       )`;
     };
+    // Mirrors isSilentRunForShell.
     const isSilentShellRun = (alias: string) => {
       const run = sql.literal(alias);
       return sql`(
@@ -6341,14 +6341,14 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   ORDER BY r.ordinal DESC, r.run_id DESC
                   LIMIT 1
                 ),
-                -- A provider-native subagent has no run; its root turn node carries the live state.
+                -- Mirrors nativeSubagentActivity: the latest run-less root turn, in projection order.
                 CASE WHEN json_extract(t.payload_json, '$.lineage.relationshipToParent') = 'subagent' THEN (
-                  SELECT n.status
+                  SELECT CASE WHEN n.status IN ('running', 'waiting') THEN n.status END
                   FROM orchestration_v2_projection_nodes n
                   WHERE n.thread_id = t.thread_id
                     AND n.run_id IS NULL
                     AND n.kind = 'root_turn'
-                    AND n.status IN ('running', 'waiting')
+                  ORDER BY COALESCE(n.started_at, '') DESC, n.node_id DESC
                   LIMIT 1
                 ) END
               ) AS activity_run_status,
