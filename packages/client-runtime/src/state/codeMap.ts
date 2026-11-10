@@ -75,7 +75,7 @@ export interface CodeMapSprite {
   readonly op: "read" | "edit" | null;
   /**
    * Working runs a tool; thinking works with none in flight. Waiting is on the user: an approval,
-   * a question, or a plan to accept. Subagents only work or think.
+   * a question, or a plan to accept. A subagent only works: its shell hears no tool traffic.
    */
   readonly state: "working" | "thinking" | "waiting" | "idle";
 }
@@ -292,7 +292,7 @@ function collectActors(
           kind: "subagent",
           parentThreadId: rootId,
           colorThreadId: rootId,
-          state: busyStateOf(thread),
+          state: "working",
         });
       }
       continue;

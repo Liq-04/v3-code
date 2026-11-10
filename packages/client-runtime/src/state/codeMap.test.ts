@@ -320,7 +320,7 @@ describe("deriveCodeMap", () => {
     expect(model.threads).toEqual([]);
   });
 
-  it("shows a working thread or subagent with no tool running as thinking and keeps its reads", () => {
+  it("shows a working thread with no tool running as thinking, a subagent as working, and keeps reads", () => {
     const READ = `/wt/thinks/${ORCH}`;
     const model = derive(
       [
@@ -341,7 +341,8 @@ describe("deriveCodeMap", () => {
       ["older", "working"],
       ["asks", "waiting"],
       ["stopped", "idle"],
-      ["child", "thinking"],
+      // A subagent's shell hears its file touches only, so it is never told apart as thinking.
+      ["child", "working"],
     ]);
     expect(model.reads).toEqual([{ path: ORCH, threadIds: ids("thinks") }]);
   });
