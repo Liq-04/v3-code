@@ -22,6 +22,12 @@ const world = buildWorld(
   600,
   400,
 );
+const resized = buildWorld(
+  { paths: [A, B, C], lines: [1600, 700, 1300], vendored: [false, false, false] },
+  [],
+  900,
+  500,
+);
 
 const agent = (path: string | null): SpriteInput => ({
   threadId: ThreadId.make("root"),
@@ -125,6 +131,20 @@ it("keeps a sprite in place when its path goes null and stands a fileless subage
   expect(root.style.transform).toBe(placed);
   expect(root.dataset.path).toBe(A);
   expect(root.firstElementChild!.className).not.toContain("code-map-walk");
+
+  // A new layout moves the parent, and the subagent with no file of its own stays beside it.
+  await screen.rerender(
+    <CodeMapSprites
+      sprites={[agent(null), subagent(null)]}
+      world={resized}
+      camera={camera}
+      {...idle}
+    />,
+  );
+  const sub = spriteOf(screen.container, "sub")!;
+  expect(root.style.transform).not.toBe(placed);
+  expect(sub.style.visibility).toBe("");
+  expect(sub.style.transform).toBe(root.style.transform);
 });
 
 it("repositions sprites when the camera moves without restarting a walk", async () => {
@@ -153,18 +173,29 @@ it("stands a thread with no file at the dock and walks it off once a file names 
   expect(root.style.visibility).toBe("");
   expect(translateX(root)).toBeLessThan(world.root.x + 60);
 
+  await screen.rerender(
+    <CodeMapSprites
+      sprites={[{ ...agent(null), home: CODE_MAP_DOCK }]}
+      world={resized}
+      camera={camera}
+      {...idle}
+    />,
+  );
+  expect(root.style.visibility).toBe("");
+  expect(translateX(root)).toBeLessThan(resized.root.x + 60);
+
   using _clock = fakeTimers();
   await screen.rerender(
     <CodeMapSprites
       sprites={[{ ...agent(A), home: CODE_MAP_DOCK }]}
-      world={world}
+      world={resized}
       camera={camera}
       {...idle}
     />,
   );
   vi.advanceTimersByTime(2000);
   expect(root.dataset.path).toBe(A);
-  const target = rectOf(world, A)!;
+  const target = rectOf(resized, A)!;
   expect(translateX(root)).toBeGreaterThan(target.x);
 });
 

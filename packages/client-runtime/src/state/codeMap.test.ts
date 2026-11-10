@@ -202,7 +202,7 @@ describe("deriveCodeMap", () => {
         parentThreadId: null,
         colorThreadId: "a",
         path: ORCH,
-        home: ORCH,
+        home: { kind: "file", path: ORCH },
         op: "edit",
         state: "working",
       },
@@ -289,7 +289,7 @@ describe("deriveCodeMap", () => {
     expect(model.marks).toHaveLength(1);
     expect(
       model.sprites.map((sprite) => [sprite.threadId, sprite.state, sprite.path, sprite.home]),
-    ).toEqual([["a", "idle", null, ORCH]]);
+    ).toEqual([["a", "idle", null, { kind: "file", path: ORCH }]]);
   });
 
   it("stands every unsettled thread at its last file and tells working, waiting and idle apart", () => {
@@ -314,7 +314,9 @@ describe("deriveCodeMap", () => {
       // A thread that names no file of the map yet still shows, at the dock.
       ["nowhere", "idle", null],
     ]);
-    expect(model.sprites.find((sprite) => sprite.threadId === "nowhere")?.home).toBe(CODE_MAP_DOCK);
+    expect(model.sprites.find((sprite) => sprite.threadId === "nowhere")?.home).toEqual(
+      CODE_MAP_DOCK,
+    );
     expect(model.threads).toEqual([]);
   });
 
@@ -356,7 +358,7 @@ describe("deriveCodeMap", () => {
     );
     expect(
       model.sprites.map((sprite) => [sprite.threadId, sprite.state, sprite.path, sprite.home]),
-    ).toEqual([["elsewhere", "idle", null, "apps/web/src/App.tsx"]]);
+    ).toEqual([["elsewhere", "idle", null, { kind: "file", path: "apps/web/src/App.tsx" }]]);
   });
 
   it("stands a new running thread with no file at the dock", () => {

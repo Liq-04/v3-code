@@ -71,7 +71,7 @@ export interface CodeMapSprite {
    * Where a sprite with no position yet stands: its thread's busiest listed change, or the dock
    * for a thread with none. Null for a subagent, which starts at its parent.
    */
-  readonly home: string | null;
+  readonly home: CodeMapPlace | null;
   readonly op: "read" | "edit" | null;
   /**
    * Working runs a tool; thinking works with none in flight. Waiting is on the user: an approval,
@@ -80,8 +80,13 @@ export interface CodeMapSprite {
   readonly state: "working" | "thinking" | "waiting" | "idle";
 }
 
-/** The repository root: where a thread that names no file of the map yet stands. */
-export const CODE_MAP_DOCK = "";
+/** Somewhere a sprite can stand: on a file of the map, or at the dock by the repository root. */
+export type CodeMapPlace =
+  | { readonly kind: "dock" }
+  | { readonly kind: "file"; readonly path: string };
+
+/** Where a thread that names no file of the map yet stands. */
+export const CODE_MAP_DOCK: CodeMapPlace = { kind: "dock" };
 
 export interface CodeMapRead {
   readonly path: string;
@@ -423,7 +428,12 @@ export function deriveCodeMap(input: DeriveCodeMapInput): CodeMap {
   for (const { thread, kind, parentThreadId, colorThreadId, state } of collectActors(input)) {
     const active = thread.source.activeFile;
     const path = active ? checkoutRelativePath(active.path, roots) : null;
-    const home = busiest.get(thread.id)?.path ?? (kind === "agent" ? CODE_MAP_DOCK : null);
+    const change = busiest.get(thread.id);
+    const home: CodeMapPlace | null = change
+      ? { kind: "file", path: change.path }
+      : kind === "agent"
+        ? CODE_MAP_DOCK
+        : null;
     // A thread that stopped has nowhere to stand until a file of the map names its place.
     if (!isBusy(state) && path === null && home === null) continue;
     sprites.push({

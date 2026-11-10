@@ -1,4 +1,4 @@
-import { CODE_MAP_DOCK, type CodeMapSprite } from "@t3tools/client-runtime/state/code-map";
+import type { CodeMapPlace, CodeMapSprite } from "@t3tools/client-runtime/state/code-map";
 import type { ThreadId } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 
@@ -9,7 +9,7 @@ export interface SpriteInput {
   readonly threadId: ThreadId;
   readonly path: string | null;
   /** Where a sprite with no position yet stands until a path names its place. */
-  readonly home: string | null;
+  readonly home: CodeMapPlace | null;
   readonly verb: string | null;
   readonly kind: "agent" | "subagent";
   readonly parentThreadId: ThreadId | null;
@@ -47,7 +47,7 @@ interface Leg {
 }
 
 interface Stop {
-  readonly path: string;
+  readonly place: CodeMapPlace;
   /** The bubble for landing here, or null for a sprite that does not speak. */
   readonly say: string | null;
 }
@@ -58,8 +58,8 @@ interface Walker {
   readonly body: HTMLDivElement;
   input: SpriteInput;
   worldPos: Point | null;
-  /** The latest path the model named: where the sprite ends up once `stops` drains. */
-  targetPath: string | null;
+  /** Where the sprite ends up once `stops` drains. Only ever a place the world could anchor. */
+  place: CodeMapPlace | null;
   leg: Leg | null;
   /** Paths named while a leg was in flight, visited in order. */
   readonly stops: Stop[];
@@ -98,6 +98,9 @@ const READ_SETTLE_MS = 1500;
 
 const easeInOutQuad = (u: number) => (u < 0.5 ? 2 * u * u : 1 - (-2 * u + 2) ** 2 / 2);
 const easeOutCubic = (u: number) => 1 - (1 - u) ** 3;
+
+const samePlace = (a: CodeMapPlace | null, b: CodeMapPlace) =>
+  a !== null && (a.kind === "file" ? b.kind === "file" && a.path === b.path : b.kind === "dock");
 
 const reducedMotion = () =>
   typeof window.matchMedia === "function" &&
@@ -217,19 +220,19 @@ function createSpriteLayer() {
     walker.el.style.transform = `translate(${worldPos.x * scale + x}px, ${worldPos.y * scale + y}px)`;
   };
 
-  const anchor = (walker: Walker, path: string): Point | null => {
+  const anchor = (walker: Walker, place: CodeMapPlace): Point | null => {
     if (!world || !camera) return null;
     let lane = 0;
     for (const other of walkers.values()) {
-      if (other !== walker && other.targetPath === path && !other.leaving) lane++;
+      if (other !== walker && samePlace(other.place, place) && !other.leaving) lane++;
     }
     const { scale } = camera.get();
     const step = walker.input.kind === "agent" ? 14 : 8;
-    if (path === CODE_MAP_DOCK) {
+    if (place.kind === "dock") {
       const { root } = world;
       return { x: root.x + (20 + lane * 30) / scale, y: root.y + root.headerHeight + 26 / scale };
     }
-    const file = world.files.get(path);
+    const file = world.files.get(place.path);
     if (!file) return null;
     return {
       x: file.x + file.w / 2 + (lane * step) / scale,
@@ -452,7 +455,7 @@ function createSpriteLayer() {
   /** Sets off for the next stop still on the map. Null when none is left to walk to. */
   const depart = (walker: Walker, now: number): Leg | null => {
     for (let stop = walker.stops.shift(); stop; stop = walker.stops.shift()) {
-      const to = anchor(walker, stop.path);
+      const to = anchor(walker, stop.place);
       if (!to) continue;
       const text = stop.say;
       const leg = startLeg(walker, to, now, true, text === null ? null : () => say(walker, text));
@@ -526,11 +529,9 @@ function createSpriteLayer() {
     walker.body.style.background = input.color;
     walker.el.style.setProperty("--code-map-color", input.color);
     walker.el.classList.toggle("opacity-50", input.quiet);
-    walker.el.setAttribute(
-      "aria-label",
-      walker.targetPath ? `${input.title} at ${walker.targetPath}` : input.title,
-    );
-    if (walker.targetPath) walker.el.dataset.path = walker.targetPath;
+    const path = walker.place?.kind === "file" ? walker.place.path : null;
+    walker.el.setAttribute("aria-label", path === null ? input.title : `${input.title} at ${path}`);
+    if (path !== null) walker.el.dataset.path = path;
     if (!speaks(input)) walker.el.querySelector("[data-testid=code-map-say]")?.remove();
   };
 
@@ -539,6 +540,10 @@ function createSpriteLayer() {
     return input.verb ? `${input.verb} ${name}` : name;
   };
 
+  /** A sprite with no place of its own stands where its parent does. */
+  const besideParent = (input: SpriteInput): Point | null =>
+    (input.parentThreadId && walkers.get(input.parentThreadId)?.worldPos) || null;
+
   const spawn = (input: SpriteInput): Walker => {
     const { el, body } = createElement(input);
     const walker: Walker = {
@@ -546,8 +551,8 @@ function createSpriteLayer() {
       el,
       body,
       input,
-      worldPos: null,
-      targetPath: null,
+      worldPos: besideParent(input),
+      place: null,
       leg: null,
       stops: [],
       paceMs: null,
@@ -560,8 +565,6 @@ function createSpriteLayer() {
     walkers.set(input.threadId, walker);
     listen(walker);
     container?.appendChild(el);
-    const parent = input.parentThreadId ? walkers.get(input.parentThreadId) : undefined;
-    if (parent?.worldPos) walker.worldPos = parent.worldPos;
     return walker;
   };
 
@@ -573,7 +576,7 @@ function createSpriteLayer() {
         halt(walker);
         look(walker, 0, 0);
         walker.stops.length = 0;
-        walker.worldPos = walker.targetPath ? anchor(walker, walker.targetPath) : null;
+        walker.worldPos = walker.place && anchor(walker, walker.place);
         project(walker);
         if (interrupted && walker.leaving) fadeOut(walker);
       }
@@ -583,27 +586,28 @@ function createSpriteLayer() {
       seen.add(input.threadId);
       const existing = walkers.get(input.threadId);
       const walker = existing ?? spawn(input);
-      const moved = input.path !== null && input.path !== walker.targetPath;
-      if (moved) {
-        walker.targetPath = input.path;
-        const to = anchor(walker, input.path!);
-        if (to) {
-          const text = speaks(input) ? bubbleText(input, input.path!) : null;
-          if (existing || walker.worldPos) {
-            visit(walker, { path: input.path!, say: text });
-          } else {
-            walker.worldPos = to;
-            if (text !== null) say(walker, text);
-          }
-        }
-      }
-      if (walker.targetPath === null && input.home !== null) {
-        const to = anchor(walker, input.home);
-        if (to) {
-          walker.targetPath = input.home;
+      const named: CodeMapPlace | null =
+        input.path === null ? null : { kind: "file", path: input.path };
+      const to = named && !samePlace(walker.place, named) ? anchor(walker, named) : null;
+      if (named && to) {
+        walker.place = named;
+        const text = speaks(input) ? bubbleText(input, named.path) : null;
+        if (existing || walker.worldPos) {
+          visit(walker, { place: named, say: text });
+        } else {
           walker.worldPos = to;
+          if (text !== null) say(walker, text);
         }
       }
+      // A new layout can drop the file a walker stood on, which sends it home.
+      if (!walker.worldPos && input.home) {
+        const home = anchor(walker, input.home);
+        if (home) {
+          walker.place = input.home;
+          walker.worldPos = home;
+        }
+      }
+      walker.worldPos ??= besideParent(input);
       apply(walker, input);
       project(walker);
     }
@@ -613,12 +617,10 @@ function createSpriteLayer() {
       endHover(walker);
       walker.el.classList.replace("pointer-events-auto", "pointer-events-none");
       walker.el.querySelector("[data-testid=code-map-say]")?.remove();
-      const parent = walker.input.parentThreadId
-        ? walkers.get(walker.input.parentThreadId)
-        : undefined;
+      const parentPos = besideParent(walker.input);
       walker.stops.length = 0;
-      if (walker.input.kind === "subagent" && parent?.worldPos && walker.worldPos) {
-        startLeg(walker, parent.worldPos, performance.now(), false, () => fadeOut(walker));
+      if (walker.input.kind === "subagent" && parentPos && walker.worldPos) {
+        startLeg(walker, parentPos, performance.now(), false, () => fadeOut(walker));
       } else {
         fadeOut(walker);
       }
