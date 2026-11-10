@@ -65,6 +65,9 @@ interface Walker {
   readonly el: HTMLDivElement;
   readonly body: HTMLDivElement;
   readonly shadow: HTMLElement;
+  readonly terminal: HTMLElement;
+  /** Lines its terminal has printed, which places each line on a row. */
+  printed: number;
   input: SpriteInput;
   worldPos: Point | null;
   /** Where the sprite ends up once `stops` drains. */
@@ -78,7 +81,7 @@ interface Walker {
   pose: ReadonlyArray<Animation>;
   mood: Mood;
   awakeUntil: number;
-  /** Offsets this walker's blinks on the shared beat so sprites do not move in step. */
+  /** Offsets this walker's blinks and typing on the shared beat so sprites do not move in step. */
   readonly phase: number;
   cueBeat: number;
   strayed: boolean;
@@ -105,6 +108,10 @@ const MAX_STOPS = 6;
 const DASH_MIN_PX = 24;
 const BEAT_MS = 500;
 const BLINK_EVERY_BEATS = 8;
+const TYPE_CYCLE_BEATS = 6;
+const TYPE_BURST_BEATS = 4;
+const PRINT_EVERY_BEATS = 2;
+const TERMINAL_ROWS = 3;
 const HOP_EVERY_BEATS = 16;
 const CLOUD_DOTS = 3;
 // Reads finish faster than the shell can show a tool running, so a sprite that just named a
@@ -133,6 +140,8 @@ const travelled = (stride: Stride, u: number) => {
   if (at < DASH_SKID) return (DASH_OVERSHOOT * Math.max(0, at - crouch)) / (DASH_SKID - crouch);
   return DASH_OVERSHOOT - ((DASH_OVERSHOOT - 1) * (at - DASH_SKID)) / (1 - DASH_SKID);
 };
+
+const terminalRowTop = (row: number) => `${2 + row * 3}px`;
 
 const samePlace = (a: CodeMapPlace | null, b: CodeMapPlace) =>
   a !== null && (a.kind === "file" ? b.kind === "file" && a.path === b.path : b.kind === "dock");
@@ -198,8 +207,18 @@ function createElement(input: SpriteInput) {
   cloud.querySelector("i")!.dataset.lit = "";
   const shadow = document.createElement("span");
   shadow.className = "code-map-shadow";
-  el.append(body, cloud, shadow);
-  return { el, body, shadow };
+  // index.css draws the terminal from this shape: its printed lines, then the cursor.
+  const terminal = document.createElement("div");
+  terminal.dataset.testid = "code-map-terminal";
+  terminal.className = "code-map-terminal";
+  [7, 9].forEach((width, row) => {
+    const line = terminal.appendChild(document.createElement("i"));
+    line.style.top = terminalRowTop(row);
+    line.style.width = `${width}px`;
+  });
+  terminal.appendChild(document.createElement("b"));
+  el.append(body, cloud, shadow, terminal);
+  return { el, body, shadow, terminal };
 }
 
 /** Turns the eyes toward a screen direction, or back to their state's expression for none. */
@@ -226,6 +245,24 @@ const hop = (walker: Walker) => {
   if (!reducedMotion()) {
     walker.body.animate(HOP_KEYFRAMES, { duration: 620, easing: "ease-in-out" });
   }
+};
+
+/** Blinks the terminal's cursor and, in bursts, scrolls a new line onto its bottom row. */
+const type = (walker: Walker, beat: number) => {
+  const { terminal } = walker;
+  terminal.toggleAttribute("data-blink", beat % 2 === 0);
+  const printing = beat % TYPE_CYCLE_BEATS < TYPE_BURST_BEATS && beat % PRINT_EVERY_BEATS === 0;
+  if (!printing || walker.leg) return;
+  walker.printed++;
+  terminal.querySelectorAll("i").forEach((line, index) => {
+    const row = (index + walker.printed * (TERMINAL_ROWS - 1)) % TERMINAL_ROWS;
+    line.style.top = terminalRowTop(row);
+    if (row === TERMINAL_ROWS - 1) line.style.width = `${Math.round(between(5, 11))}px`;
+  });
+  walker.body.animate(
+    { rotate: ["0deg", "3deg", "0deg"], scale: ["1 1", "1.03 0.96", "1 1"] },
+    { duration: 240 },
+  );
 };
 
 const hopFrame = (lift: number, scale: string, lean: number) =>
@@ -471,6 +508,7 @@ function createSpriteLayer() {
         dot.toggleAttribute("data-lit", index === beat % CLOUD_DOTS);
       });
     }
+    if (mood === "working") type(walker, own);
     if (mood === "waiting" && (beat - walker.cueBeat) % HOP_EVERY_BEATS === 0) hop(walker);
     if (mood === "awake" && beat >= walker.cueBeat) stroll(walker);
     if (own % BLINK_EVERY_BEATS === 0) blink(walker);
@@ -689,6 +727,7 @@ function createSpriteLayer() {
     const walker: Walker = {
       threadId: input.threadId,
       ...createElement(input),
+      printed: 0,
       input,
       worldPos: besideParent(input),
       place: null,

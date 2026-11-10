@@ -670,7 +670,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   }
 }
 
-/* Map sprite faces, shadows and thought clouds. CodeMapSprites sets data-state, data-look and data-done. */
+/* Map sprite faces, shadows, thought clouds and terminals. CodeMapSprites sets data-state, data-look and data-done. */
 .code-map-sprite {
   --code-map-eye-unit: 1px;
   --code-map-eye-look: translate(
@@ -720,7 +720,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   transform: translate(var(--code-map-eye-unit), calc(var(--code-map-eye-unit) * -1.5));
 }
 
-.code-map-sprite[data-state="working"] .code-map-eye,
+.code-map-sprite[data-state="working"] .code-map-eye {
+  transform: translate(calc(var(--code-map-eye-unit) * 1.4), calc(var(--code-map-eye-unit) * 0.5))
+    scaleY(0.8);
+}
+
 .code-map-sprite[data-state="thinking"][data-busy] .code-map-eye {
   transform: translateY(var(--code-map-eye-unit)) scaleY(0.72);
 }
@@ -837,10 +841,71 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   transform: translateY(-1px);
 }
 
+.code-map-terminal {
+  position: absolute;
+  top: 5px;
+  left: 25px;
+  width: 15px;
+  height: 12px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: #2b3a33;
+  box-shadow:
+    0 0 0 1.5px var(--background),
+    inset 0 0 0 1px #46584f;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 160ms ease-out,
+    visibility 160ms;
+}
+
+.code-map-sprite[data-kind="subagent"] .code-map-terminal {
+  top: 2.8px;
+  left: 14.7px;
+  scale: 0.6;
+  transform-origin: 0 0;
+}
+
+.code-map-sprite[data-state="working"] .code-map-terminal {
+  opacity: 1;
+  visibility: visible;
+}
+
+.code-map-terminal i,
+.code-map-terminal b {
+  position: absolute;
+  left: 2px;
+  height: 1.2px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--code-map-color) 70%, #eaf6ec);
+}
+
+.code-map-terminal b {
+  top: 7.5px;
+  width: 2px;
+  height: 3px;
+}
+
+.code-map-terminal[data-blink] b {
+  opacity: 0;
+}
+
+/* The bubble for a file lands clear of the terminal. */
+.code-map-sprite[data-state="working"] .code-map-say {
+  translate: 12px 0;
+}
+
+.code-map-sprite[data-kind="subagent"][data-state="working"] .code-map-say {
+  translate: 8px 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .code-map-eye,
   .code-map-cloud,
-  .code-map-cloud i {
+  .code-map-cloud i,
+  .code-map-terminal {
     transition: none;
   }
 

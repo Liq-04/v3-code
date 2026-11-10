@@ -287,11 +287,23 @@ it("hops once to a near file and twice to a far one, travelling only while it is
   expect(positionOf(root).x).toBeCloseTo((a!.x * 300) / apart, 2);
 });
 
-it("moves a sprite straight onto its file when motion is reduced", async () => {
+const inState = (state: SpriteInput["state"]): SpriteInput => ({ ...agent(A), state });
+const stopAnimations = (...elements: ReadonlyArray<Element>) => {
+  for (const element of elements)
+    for (const animation of element.getAnimations()) animation.cancel();
+};
+const terminalOf = (sprite: HTMLElement) =>
+  sprite.querySelector<HTMLElement>('[data-testid="code-map-terminal"]')!;
+const linesOf = (terminal: HTMLElement) =>
+  [...terminal.querySelectorAll("i")].map((line) => line.offsetTop).join();
+
+it("moves a sprite straight onto its file and shows its terminal without printing when motion is reduced", async () => {
   const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
+  // Mounted idle so the shared beat starts under the fake clock.
   await using screen = await render(
-    <CodeMapSprites sprites={[agent(A)]} world={world} camera={camera} {...idle} />,
+    <CodeMapSprites sprites={[inState("idle")]} world={world} camera={camera} {...idle} />,
   );
+  using _clock = fakeTimers();
   using _motion = vi
     .spyOn(window, "matchMedia")
     .mockReturnValue({ matches: true } as MediaQueryList);
@@ -299,17 +311,18 @@ it("moves a sprite straight onto its file when motion is reduced", async () => {
     <CodeMapSprites sprites={[agent(B)]} world={world} camera={camera} {...idle} />,
   );
   const root = spriteOf(screen.container, "root")!;
+  const terminal = terminalOf(root);
   expect(standingOn(root)).toBe(B);
+  await vi.waitFor(() => expect(getComputedStyle(terminal).visibility).toBe("visible"));
+
+  const printed = linesOf(terminal);
+  vi.advanceTimersByTime(6000);
+  expect(linesOf(terminal)).toBe(printed);
+  expect(getComputedStyle(terminal.querySelector("b")!).opacity).toBe("1");
   expect(root.firstElementChild!.getAnimations()).toHaveLength(0);
 });
 
-const inState = (state: SpriteInput["state"]): SpriteInput => ({ ...agent(A), state });
-const stopAnimations = (...elements: ReadonlyArray<Element>) => {
-  for (const element of elements)
-    for (const animation of element.getAnimations()) animation.cancel();
-};
-
-it("steps a thinking sprite's cloud on a beat that stops when all are idle", async () => {
+it("steps a thinking sprite's cloud and prints on a working one's terminal on a beat that stops when all are idle", async () => {
   const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
   await using screen = await render(
     <CodeMapSprites sprites={[inState("idle")]} world={world} camera={camera} {...idle} />,
@@ -318,10 +331,13 @@ it("steps a thinking sprite's cloud on a beat that stops when all are idle", asy
   const root = spriteOf(screen.container, "root")!;
   const body = root.firstElementChild!;
   const cloud = root.querySelector('[data-testid="code-map-cloud"]')!;
+  const terminal = terminalOf(root);
+  const cursor = terminal.querySelector("b")!;
   const litDot = () =>
     [...cloud.querySelectorAll("i")].findIndex((dot) => dot.dataset.lit !== undefined);
   expect(getComputedStyle(body.querySelector("i")!).transform).toBe("matrix(1, 0, 0, 0.14, 0, 0)");
   expect(getComputedStyle(cloud).visibility).toBe("hidden");
+  expect(getComputedStyle(terminal).visibility).toBe("hidden");
   expect(vi.getTimerCount()).toBe(0);
 
   await screen.rerender(
@@ -335,12 +351,26 @@ it("steps a thinking sprite's cloud on a beat that stops when all are idle", asy
     lit.push(litDot());
   }
   expect(lit).toEqual([0, 1, 2, 0]);
+  expect(getComputedStyle(terminal).visibility).toBe("hidden");
 
   await screen.rerender(
     <CodeMapSprites sprites={[inState("working")]} world={world} camera={camera} {...idle} />,
   );
   expect(root.dataset.state).toBe("working");
-  vi.advanceTimersByTime(1000);
+  await vi.waitFor(() => expect(getComputedStyle(terminal).visibility).toBe("visible"));
+  let printed = 0;
+  const cursorShown: boolean[] = [];
+  for (let beat = 0; beat < 12; beat++) {
+    const before = linesOf(terminal);
+    stopAnimations(body);
+    vi.advanceTimersByTime(500);
+    const landed = linesOf(terminal) !== before;
+    if (landed) printed++;
+    expect(body.getAnimations()).toHaveLength(landed ? 1 : 0);
+    cursorShown.push(getComputedStyle(cursor).opacity === "1");
+  }
+  expect(printed).toBe(4);
+  expect(cursorShown).toEqual(cursorShown.map((_, beat) => (beat % 2 === 0) === cursorShown[0]));
   expect(litDot()).toBe(0);
 
   await screen.rerender(
@@ -349,6 +379,7 @@ it("steps a thinking sprite's cloud on a beat that stops when all are idle", asy
   expect(root.dataset.state).toBe("idle");
   expect(root.dataset.done).toBeDefined();
   expect(vi.getTimerCount()).toBe(0);
+  await vi.waitFor(() => expect(getComputedStyle(terminal).visibility).toBe("hidden"));
 });
 
 it("hops a waiting sprite when it starts waiting and every 8 s, blinks it, and stops when it is idle", async () => {
