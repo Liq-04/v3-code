@@ -75,14 +75,13 @@ export interface CodeMapSprite {
   readonly op: "read" | "edit" | null;
   /**
    * Working runs a tool; thinking works with none in flight. Waiting is on the user: an approval,
-   * a question, or a plan to accept. A subagent only works: its shell hears no tool traffic.
+   * a question, or a plan to accept. A subagent only works.
    */
   readonly state: "working" | "thinking" | "waiting" | "idle";
   /** When an idle thread's latest run ended, in epoch ms. Null in any other state or with no such run. */
   readonly idleSince: number | null;
 }
 
-/** Somewhere a sprite can stand: on a file of the map, or at the dock by the repository root. */
 export type CodeMapPlace =
   | { readonly kind: "dock" }
   | { readonly kind: "file"; readonly path: string };
@@ -261,8 +260,7 @@ interface CodeMapActor {
   readonly state: CodeMapSprite["state"];
 }
 
-// Thinking needs a run in flight: a session kept busy by background work has no tool running
-// either. An older server names no tool state, which reads as working.
+// An older server names no tool state, which reads as working.
 const busyStateOf = (thread: CodeMapThreadInput) =>
   thread.source.activeRunId !== null && thread.source.toolRunning === false
     ? "thinking"

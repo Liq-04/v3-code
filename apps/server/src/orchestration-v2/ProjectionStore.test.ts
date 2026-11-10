@@ -8874,7 +8874,6 @@ it.effect("a provider-native subagent's shell is live while its root turn runs",
     yield* expectActivity("running");
     yield* setRoot("root", "completed");
     yield* expectActivity(null);
-    // An older root turn left running does not outlive the newer one that completed.
     yield* setRoot("stuck", "running", DateTime.subtract(now, { minutes: 1 }));
     yield* expectActivity(null);
   }).pipe(Effect.provide(layerTest)),

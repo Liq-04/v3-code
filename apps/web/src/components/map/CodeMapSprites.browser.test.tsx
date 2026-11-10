@@ -76,7 +76,6 @@ const standingOn = (el: HTMLElement) => {
 
 it("spawns a subagent at its parent in the parent's colour, walks it to its file, and walks it home when it finishes", async () => {
   const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
-  // Mounted empty so the shared beat starts under the fake clock.
   await using screen = await render(
     <CodeMapSprites sprites={[]} world={world} camera={camera} {...idle} />,
   );
@@ -100,7 +99,6 @@ it("spawns a subagent at its parent in the parent's colour, walks it to its file
   expect(translateX(sub)).toBeGreaterThan(target.x);
   expect(translateX(sub)).toBeLessThan(target.x + target.w);
   expect(sub.querySelector('[data-testid="code-map-say"]')).toHaveTextContent("Read git.ts");
-  // The working parent's beat is the one timer left: no walk frame, no fade.
   expect(vi.getTimerCount()).toBe(1);
 
   await screen.rerender(
@@ -112,7 +110,6 @@ it("spawns a subagent at its parent in the parent's colour, walks it to its file
   expect(sub.style.opacity).toBe("0");
   vi.advanceTimersByTime(400);
   expect(spriteOf(screen.container, "sub")).toBeNull();
-  // The working parent's beat is the one timer left: no walk frame, no fade.
   expect(vi.getTimerCount()).toBe(1);
 });
 
@@ -138,7 +135,6 @@ it("keeps a sprite in place when its path goes null and stands a fileless subage
   expect(root.dataset.path).toBe(A);
   expect(root.firstElementChild!.className).not.toContain("code-map-walk");
 
-  // A new layout moves the parent, and the subagent with no file of its own stays beside it.
   await screen.rerender(
     <CodeMapSprites
       sprites={[agent(null), subagent(null)]}
@@ -207,7 +203,6 @@ it("stands a thread with no file at the dock and walks it off once a file names 
 
 it("stands on every file of a fast burst in order and lands on the last one soon after it", async () => {
   const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
-  // Mounted empty so the shared beat starts under the fake clock.
   await using screen = await render(
     <CodeMapSprites sprites={[]} world={world} camera={camera} {...idle} />,
   );
@@ -242,7 +237,6 @@ it("stands on every file of a fast burst in order and lands on the last one soon
   expect(said).toEqual(["Edit ChatView.tsx", "Edit index.css"]);
   expect(root.firstElementChild!.className).not.toContain("code-map-walk");
   expect(root.dataset.look).toBeUndefined();
-  // The working sprite's beat is the one timer left: no walk frame.
   expect(vi.getTimerCount()).toBe(1);
 });
 
@@ -357,7 +351,6 @@ it("holds the thinking cloud back while files keep coming and shows it once they
 
 const AWAKE_MS = 5 * 60_000;
 const NOW = Date.parse("2026-06-01T12:00:00.000Z");
-/** An idle sprite whose turn ended this long before the fake clock's start. */
 const rested = (endedAgoMs: number): SpriteInput => ({
   ...agent(A),
   state: "idle",
@@ -366,12 +359,10 @@ const rested = (endedAgoMs: number): SpriteInput => ({
 
 it("strolls an idle sprite whose turn just ended without moving its place, and walks it back to work", async () => {
   const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
-  // Mounted empty so the shared beat starts under the fake clock.
   await using screen = await render(
     <CodeMapSprites sprites={[]} world={world} camera={camera} {...idle} />,
   );
   using _clock = fakeTimers({ now: NOW });
-  // The shortest wait, due east, the shortest reach.
   using _random = vi.spyOn(Math, "random").mockReturnValue(0);
   await screen.rerender(
     <CodeMapSprites sprites={[rested(0)]} world={world} camera={camera} {...idle} />,
@@ -388,13 +379,11 @@ it("strolls an idle sprite whose turn just ended without moving its place, and w
 
   vi.advanceTimersByTime(7500);
   expect(standingOn(root)).toBe(A);
-  // No tap: the body has not moved in 15 beats.
   expect(body.getAnimations()).toHaveLength(0);
   vi.advanceTimersByTime(3000);
   const home = rectOf(world, A)!;
   expect(translateX(root)).toBeGreaterThan(home.x + home.w / 2 + 30);
   expect(body.className).not.toContain("code-map-walk");
-  // A stroll is not work: no bubble, no reading face, and the place is unchanged.
   expect(root.querySelector('[data-testid="code-map-say"]')).toBeNull();
   expect(root.dataset.busy).toBeUndefined();
   expect(root.dataset.path).toBe(A);
@@ -411,7 +400,6 @@ it("strolls an idle sprite whose turn just ended without moving its place, and w
 
 it("puts an awake idle sprite back on its file when the map is laid out again, and to sleep after 5 minutes", async () => {
   const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
-  // Mounted empty so the shared beat starts under the fake clock.
   await using screen = await render(
     <CodeMapSprites sprites={[]} world={world} camera={camera} {...idle} />,
   );

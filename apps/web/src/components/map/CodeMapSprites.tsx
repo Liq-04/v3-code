@@ -20,7 +20,6 @@ export interface SpriteInput {
   readonly idleSince: number | null;
 }
 
-/** What a sprite acts out. An idle one is awake for a while after its turn ends, then asleep. */
 type Mood = Exclude<CodeMapSprite["state"], "idle"> | "awake" | "asleep";
 
 export interface SpriteHover {
@@ -50,7 +49,6 @@ interface Leg {
   readonly onArrive: (() => void) | null;
 }
 
-/** A paced leg fits the time until the next path is likely to land; an amble is a slow stroll. */
 type Gait = "paced" | "walk" | "amble";
 
 interface Stop {
@@ -79,9 +77,7 @@ interface Walker {
   readonly phase: number;
   /** The beat on which the walker entered its mood. */
   moodBeat: number;
-  /** The beat on which an awake walker next strolls. */
   strollBeat: number;
-  /** A stroll took the walker off its place. */
   strayed: boolean;
   leaving: boolean;
 }
@@ -107,7 +103,6 @@ const CLOUD_DOTS = 3;
 // Reads finish faster than the shell can show a tool running, so a sprite that just named a
 // file is still busy reading; the cloud waits until the files stop coming.
 const READ_SETTLE_MS = 1500;
-// A fixed stand-in for the provider's prompt-cache window.
 const AWAKE_MS = 5 * 60_000;
 const STROLL_MIN_BEATS = 16;
 const STROLL_MAX_BEATS = 28;
@@ -533,7 +528,6 @@ function createSpriteLayer() {
 
   const nextStrollBeat = () => beat + Math.round(between(STROLL_MIN_BEATS, STROLL_MAX_BEATS));
 
-  /** A short amble to a random spot nearby. It leaves the walker's place as it was. */
   const stroll = (walker: Walker) => {
     walker.strollBeat = nextStrollBeat();
     const from = walker.worldPos;
@@ -546,7 +540,6 @@ function createSpriteLayer() {
       x: clamp(from.x + Math.cos(angle) * reach, edge, world.width - edge),
       y: clamp(from.y + Math.sin(angle) * reach, edge, world.height - edge),
     };
-    // A cornered walker has nowhere to go this time.
     if (Math.hypot(to.x - from.x, to.y - from.y) * scale < STROLL_MIN_PX / 2) return;
     walker.strayed = true;
     startLeg(walker, to, performance.now(), "amble", null);
@@ -607,7 +600,6 @@ function createSpriteLayer() {
     return input.verb ? `${input.verb} ${name}` : name;
   };
 
-  /** A sprite with no place of its own stands where its parent does. */
   const besideParent = (input: SpriteInput): Point | null =>
     (input.parentThreadId && walkers.get(input.parentThreadId)?.worldPos) || null;
 
@@ -658,7 +650,6 @@ function createSpriteLayer() {
       seen.add(input.threadId);
       const existing = walkers.get(input.threadId);
       const walker = existing ?? spawn(input);
-      // Work resumed: the stroll ends, and the walker heads to the file it names or back to its own.
       const returning = walker.strayed && input.state !== "idle";
       if (returning) {
         walker.strayed = false;
@@ -677,7 +668,6 @@ function createSpriteLayer() {
           if (text !== null) say(walker, text);
         }
       }
-      // A new layout can drop the file a walker stood on, which sends it home.
       if (!walker.worldPos && input.home) {
         const home = anchor(walker, input.home);
         if (home) {

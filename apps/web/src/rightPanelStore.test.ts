@@ -456,7 +456,6 @@ describe("rightPanelStore", () => {
     store.revealPinnedMap(refD, inline);
     expect(active(refD)).toBe("map");
 
-    // A narrow window lays the panel over the chat as a sheet, so a visit there leaves it shut.
     const refE = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-E"));
     store.revealPinnedMap(refE, { sheetLayout: true });
     expect(panel(refE).surfaces).toEqual([]);

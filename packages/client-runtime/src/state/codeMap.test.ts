@@ -71,7 +71,6 @@ function thread(
     subagentOf?: string;
     root?: string;
     project?: ProjectId;
-    /** Null is a busy session with no active run, as when a parent waits on background work. */
     run?: string | null;
     /** A provider-native subagent: no T3 runtime or run, live only through its shell status. */
     native?: boolean;
@@ -79,7 +78,6 @@ function thread(
     snoozedUntil?: string;
     waiting?: boolean;
     toolRunning?: boolean;
-    /** When the thread's latest run ended. */
     completedAt?: string;
     active?: { path: string; op: "read" | "edit"; at?: string };
   } = {},
@@ -363,9 +361,7 @@ describe("deriveCodeMap", () => {
       ["older", "working"],
       ["asks", "waiting"],
       ["stopped", "idle"],
-      // Its run ended and the session is still busy: no run means nothing is thinking.
       ["lingers", "working"],
-      // A subagent's shell hears its file touches only, so it is never told apart as thinking.
       ["child", "working"],
     ]);
     expect(model.reads).toEqual([{ path: ORCH, threadIds: ids("thinks") }]);
