@@ -707,6 +707,167 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   }
 }
 
+/* Map sprite faces and thought clouds. CodeMapSprites sets data-state, data-look and data-done. */
+.code-map-sprite {
+  --code-map-eye-unit: 1px;
+  --code-map-eye-look: translate(
+    calc(var(--code-map-look-x, 0) * 1.5 * var(--code-map-eye-unit)),
+    calc(var(--code-map-look-y, 0) * 1.5 * var(--code-map-eye-unit))
+  );
+}
+
+.code-map-sprite[data-kind="subagent"] {
+  --code-map-eye-unit: 0.6px;
+}
+
+.code-map-eye {
+  width: 4.5px;
+  height: 7px;
+  border-radius: 2.5px;
+  background: #14241c;
+  transform-origin: 50% 55%;
+  transition: transform 180ms ease-out;
+}
+
+.code-map-sprite[data-kind="subagent"] .code-map-eye {
+  width: 2.5px;
+  height: 4px;
+  border-radius: 1.5px;
+}
+
+.code-map-sprite[data-state="thinking"] .code-map-eye {
+  transform: translate(var(--code-map-eye-unit), calc(var(--code-map-eye-unit) * -1.5));
+}
+
+.code-map-sprite[data-state="working"] .code-map-eye {
+  transform: translateY(var(--code-map-eye-unit)) scaleY(0.72);
+}
+
+.code-map-sprite[data-state="waiting"] .code-map-eye {
+  transform: scale(1.14);
+}
+
+.code-map-sprite[data-state="idle"] .code-map-eye {
+  transform: scaleY(0.14);
+}
+
+/* A walking sprite looks where it goes, and the eye on the far side narrows. */
+.code-map-sprite[data-look]:not([data-state="idle"]) .code-map-eye {
+  transform: var(--code-map-eye-look);
+}
+
+.code-map-sprite[data-look="left"]:not([data-state="idle"]) .code-map-eye:last-of-type,
+.code-map-sprite[data-look="right"]:not([data-state="idle"]) .code-map-eye:first-of-type {
+  transform: var(--code-map-eye-look) scaleX(0.82);
+}
+
+/* A run that just finished squeezes its eyes into happy arcs once before they close. */
+.code-map-sprite[data-done] .code-map-eye {
+  animation: code-map-eye-happy 600ms ease-out;
+}
+
+@keyframes code-map-eye-happy {
+  0%,
+  80% {
+    height: 4px;
+    border-radius: 4px 4px 1px 1px;
+    transform: translateY(-1px);
+  }
+}
+
+.code-map-cloud {
+  position: absolute;
+  top: -28px;
+  left: 17px;
+  width: 36px;
+  height: 31px;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: scale(0.6);
+  transform-origin: 0 100%;
+  transition:
+    opacity 160ms ease-out,
+    transform 160ms ease-out,
+    visibility 160ms;
+}
+
+.code-map-sprite[data-kind="subagent"] .code-map-cloud {
+  top: -29px;
+  left: 10px;
+  scale: 0.6;
+}
+
+.code-map-sprite[data-state="thinking"] .code-map-cloud {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+}
+
+.code-map-cloud > span {
+  position: absolute;
+  background: var(--popover);
+  box-shadow:
+    0 0 0 1px var(--border),
+    0 2px 5px rgb(0 0 0 / 18%);
+}
+
+.code-map-cloud > span:nth-child(1) {
+  top: 27px;
+  left: 0;
+  width: 3.5px;
+  height: 3.5px;
+  border-radius: 1px;
+}
+
+.code-map-cloud > span:nth-child(2) {
+  top: 19px;
+  left: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+}
+
+.code-map-cloud > span:nth-child(3) {
+  top: 0;
+  left: 6px;
+  display: flex;
+  width: 30px;
+  height: 17px;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border-radius: 7px 7px 7px 3px;
+}
+
+.code-map-cloud i {
+  width: 4px;
+  height: 5px;
+  border-radius: 1.5px;
+  background: var(--code-map-color);
+  opacity: 0.28;
+  transition:
+    opacity 120ms,
+    transform 120ms;
+}
+
+.code-map-cloud i[data-lit] {
+  opacity: 1;
+  transform: translateY(-1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .code-map-eye,
+  .code-map-cloud,
+  .code-map-cloud i {
+    transition: none;
+  }
+
+  .code-map-sprite[data-done] .code-map-eye {
+    animation: none;
+  }
+}
+
 @utility live-activity-focus-aligned {
   width: calc(100% - var(--live-activity-focus-width) - var(--live-activity-focus-width));
   margin-left: var(--live-activity-focus-width);

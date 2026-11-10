@@ -67,6 +67,10 @@ interface Walker {
   paceMs: number | null;
   pathChangedAt: number | null;
   pose: Animation | null;
+  /** Offsets this walker's blinks and taps on the shared beat so sprites do not move in step. */
+  readonly phase: number;
+  /** The beat on which the walker entered its state. */
+  stateBeat: number;
   leaving: boolean;
 }
 
@@ -83,6 +87,11 @@ const MAX_STOPS = 6;
 const DASH_MIN_PX = 24;
 const DASH_SQUASH_MS = 70;
 const PASS_TICK_MS = 110;
+const BEAT_MS = 500;
+const TAP_EVERY_BEATS = 2;
+const BLINK_EVERY_BEATS = 8;
+const HOP_EVERY_BEATS = 16;
+const CLOUD_DOTS = 3;
 
 const easeInOutQuad = (u: number) => (u < 0.5 ? 2 * u * u : 1 - (-2 * u + 2) ** 2 / 2);
 const easeOutCubic = (u: number) => 1 - (1 - u) ** 3;
@@ -92,21 +101,25 @@ const reducedMotion = () =>
   window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 const SPRITE_CLASS =
-  "group pointer-events-auto absolute top-0 left-0 z-10 cursor-pointer outline-none will-change-transform";
+  "code-map-sprite group pointer-events-auto absolute top-0 left-0 z-10 cursor-pointer outline-none will-change-transform";
 const AGENT_BOX = "h-[22px] w-[26px] -mt-[22px] -ml-[13px]";
 const SUBAGENT_BOX = "h-[13px] w-[15px] -mt-[13px] -ml-[7.5px]";
 const AGENT_BODY =
-  "flex size-full origin-bottom items-center justify-center gap-1 rounded-t-lg rounded-b-sm shadow-lg shadow-black/30 ring-2 ring-background";
+  "relative flex size-full origin-bottom items-center justify-center gap-[5px] rounded-t-lg rounded-b-sm shadow-lg shadow-black/30 ring-2 ring-background";
 const SUBAGENT_BODY =
-  "flex size-full origin-bottom items-center justify-center gap-[3px] rounded-t-sm rounded-b-xs opacity-90 shadow-md shadow-black/30 ring-1 ring-background";
+  "relative flex size-full origin-bottom items-center justify-center gap-[3px] rounded-t-sm rounded-b-xs opacity-90 shadow-md shadow-black/30 ring-1 ring-background";
 const BODY_FOCUS_CLASS =
   "group-focus-visible:outline-2 group-focus-visible:-outline-offset-2 group-focus-visible:outline-ring";
-const EYE_CLASS = "rounded-xs bg-white transition-transform duration-200";
 const WAITING_BADGE_CLASS =
   "pointer-events-none absolute -top-1 -right-1 size-2 rounded-full bg-warning ring-1 ring-background";
 
-const eyeShape = (input: SpriteInput) =>
-  input.kind === "subagent" ? "size-[3px]" : input.state === "idle" ? "h-0.5 w-1.5" : "h-1.5 w-1";
+const HOP_KEYFRAMES = [
+  { translate: "0 0", scale: "1 1" },
+  { translate: "0 -6px", scale: "0.96 1.05", offset: 0.22 },
+  { translate: "0 0", scale: "1.08 0.92", offset: 0.45 },
+  { translate: "0 -3px", scale: "1 1", offset: 0.68 },
+  { translate: "0 0", scale: "1 1" },
+];
 
 function createElement(input: SpriteInput): { el: HTMLDivElement; body: HTMLDivElement } {
   const el = document.createElement("div");
@@ -118,8 +131,19 @@ function createElement(input: SpriteInput): { el: HTMLDivElement; body: HTMLDivE
   el.tabIndex = 0;
   const body = document.createElement("div");
   body.className = `${input.kind === "agent" ? AGENT_BODY : SUBAGENT_BODY} ${BODY_FOCUS_CLASS}`;
-  for (let i = 0; i < 2; i++) body.appendChild(document.createElement("i"));
-  el.appendChild(body);
+  for (let i = 0; i < 2; i++) {
+    body.appendChild(document.createElement("i")).className = "code-map-eye";
+  }
+  // index.css draws the cloud from this shape: two tail puffs, then the bubble and its dots.
+  const cloud = document.createElement("div");
+  cloud.dataset.testid = "code-map-cloud";
+  cloud.className = "code-map-cloud";
+  for (let i = 0; i < 3; i++) cloud.appendChild(document.createElement("span"));
+  for (let i = 0; i < CLOUD_DOTS; i++) {
+    cloud.lastElementChild!.appendChild(document.createElement("i"));
+  }
+  cloud.querySelector("i")!.dataset.lit = "";
+  el.append(body, cloud);
   return { el, body };
 }
 
@@ -130,6 +154,9 @@ function createSpriteLayer() {
   const walkers = new Map<ThreadId, Walker>();
   const fades = new Set<ReturnType<typeof setTimeout>>();
   let frame = 0;
+  let beat = 0;
+  let beatTimer: ReturnType<typeof setInterval> | null = null;
+  let spawned = 0;
   let handlers: SpriteHandlers | null = null;
   let hover: {
     readonly walker: Walker;
@@ -230,6 +257,70 @@ function createSpriteLayer() {
     if (moving) tick();
   };
 
+  /** Turns the eyes toward a screen direction, or back to their state's expression for none. */
+  const look = (walker: Walker, dx: number, dy: number) => {
+    const { el } = walker;
+    const distance = Math.hypot(dx, dy);
+    if (distance === 0) {
+      delete el.dataset.look;
+      return;
+    }
+    el.style.setProperty("--code-map-look-x", String(dx / distance));
+    el.style.setProperty("--code-map-look-y", String(dy / distance));
+    el.dataset.look = Math.abs(dx) < distance * 0.3 ? "straight" : dx < 0 ? "left" : "right";
+  };
+
+  // These animate `scale` and `translate`, which compose with the transforms CSS and walks own.
+  const blink = (walker: Walker) => {
+    for (const eye of walker.body.querySelectorAll("i")) {
+      eye.animate({ scale: ["1 1", "1 0.1", "1 1"] }, { duration: 140 });
+    }
+  };
+
+  const tap = (walker: Walker) =>
+    walker.body.animate(
+      { scale: ["1 1", "1.06 0.9", "1 1"] },
+      { duration: 220, easing: "ease-in-out" },
+    );
+
+  const hop = (walker: Walker) => {
+    if (!reducedMotion()) {
+      walker.body.animate(HOP_KEYFRAMES, { duration: 620, easing: "ease-in-out" });
+    }
+  };
+
+  const onBeat = () => {
+    beat++;
+    if (reducedMotion()) return;
+    for (const walker of walkers.values()) {
+      const { state } = walker.input;
+      if (walker.leaving || state === "idle") continue;
+      const own = beat + walker.phase;
+      if (state === "thinking") {
+        walker.el.querySelectorAll<HTMLElement>(".code-map-cloud i").forEach((dot, index) => {
+          dot.toggleAttribute("data-lit", index === beat % CLOUD_DOTS);
+        });
+      }
+      if (state === "working" && own % TAP_EVERY_BEATS === 0 && !walker.leg) tap(walker);
+      if (state === "waiting" && (beat - walker.stateBeat) % HOP_EVERY_BEATS === 0) hop(walker);
+      if (own % BLINK_EVERY_BEATS === 0) blink(walker);
+    }
+  };
+
+  /** The beat runs only while some sprite is in a state that moves on it. */
+  const syncBeat = () => {
+    let needed = false;
+    for (const walker of walkers.values()) {
+      needed ||= !walker.leaving && walker.input.state !== "idle";
+    }
+    if (needed && beatTimer === null) {
+      beatTimer = setInterval(onBeat, BEAT_MS);
+    } else if (!needed && beatTimer !== null) {
+      clearInterval(beatTimer);
+      beatTimer = null;
+    }
+  };
+
   const strike = (walker: Walker, pose: Animation | null) => {
     walker.pose?.cancel();
     walker.pose = pose;
@@ -257,6 +348,8 @@ function createSpriteLayer() {
       }
       return;
     }
+    look(walker, 0, 0);
+    if (walker.input.state !== "idle") blink(walker);
     void walker.body.offsetWidth;
     walker.body.classList.add("code-map-land");
     leg.onArrive?.();
@@ -301,11 +394,9 @@ function createSpriteLayer() {
     const dx = (to.x - from.x) * scale;
     const dy = (to.y - from.y) * scale;
     const distance = Math.hypot(dx, dy);
-    for (const eye of walker.body.querySelectorAll<HTMLElement>("i")) {
-      eye.style.transform = `translateX(${Math.sign(dx) * 1.5}px)`;
-    }
     if (reducedMotion()) {
       halt(walker);
+      look(walker, 0, 0);
       walker.worldPos = to;
       project(walker);
       onArrive?.();
@@ -320,6 +411,7 @@ function createSpriteLayer() {
     const moveMs = dash ? durationMs * 0.75 : durationMs;
     const leg: Leg = { from, to, startedAt: now, holdMs, moveMs, dash, onArrive };
     walker.leg = leg;
+    look(walker, dx, dy);
     walker.body.classList.remove("code-map-land");
     walker.body.classList.toggle("code-map-walk", !dash);
     if (dash) {
@@ -398,17 +490,21 @@ function createSpriteLayer() {
     fades.add(timer);
   };
 
+  // index.css draws each state's eyes and cloud from these attributes.
   const paintState = (walker: Walker) => {
     const { input, el, body } = walker;
+    const finished = el.dataset.state === "working" || el.dataset.state === "thinking";
     el.dataset.state = input.state;
+    el.toggleAttribute("data-done", finished && input.state === "idle");
+    walker.stateBeat = beat;
     body.classList.toggle("opacity-70", input.state === "idle");
-    for (const eye of body.querySelectorAll("i")) eye.className = `${EYE_CLASS} ${eyeShape(input)}`;
-    el.querySelector("[data-testid=code-map-waiting]")?.remove();
+    body.querySelector("[data-testid=code-map-waiting]")?.remove();
     if (input.state !== "waiting") return;
     const badge = document.createElement("span");
     badge.dataset.testid = "code-map-waiting";
     badge.className = WAITING_BADGE_CLASS;
-    el.appendChild(badge);
+    body.appendChild(badge);
+    hop(walker);
   };
 
   const speaks = (input: SpriteInput) => !input.quiet && input.state !== "idle";
@@ -417,6 +513,7 @@ function createSpriteLayer() {
     walker.input = input;
     if (walker.el.dataset.state !== input.state) paintState(walker);
     walker.body.style.background = input.color;
+    walker.el.style.setProperty("--code-map-color", input.color);
     walker.el.classList.toggle("opacity-50", input.quiet);
     walker.el.setAttribute(
       "aria-label",
@@ -445,6 +542,8 @@ function createSpriteLayer() {
       paceMs: null,
       pathChangedAt: null,
       pose: null,
+      phase: spawned++,
+      stateBeat: beat,
       leaving: false,
     };
     walkers.set(input.threadId, walker);
@@ -461,6 +560,7 @@ function createSpriteLayer() {
       for (const walker of walkers.values()) {
         const interrupted = walker.leg;
         halt(walker);
+        look(walker, 0, 0);
         walker.stops.length = 0;
         walker.worldPos = walker.targetPath ? anchor(walker, walker.targetPath) : null;
         project(walker);
@@ -512,6 +612,7 @@ function createSpriteLayer() {
         fadeOut(walker);
       }
     }
+    syncBeat();
   };
 
   return {
@@ -534,6 +635,8 @@ function createSpriteLayer() {
     dispose() {
       if (frame !== 0) cancelAnimationFrame(frame);
       frame = 0;
+      if (beatTimer !== null) clearInterval(beatTimer);
+      beatTimer = null;
       handlers = null;
       endHover();
       for (const timer of fades) clearTimeout(timer);
@@ -576,7 +679,7 @@ export function CodeMapSprites(props: {
     if (element) layer.sync(sprites, world);
   }, [layer, element, sprites, world]);
 
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- cancels the walk frame and fade timers on unmount
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- cancels the walk frame, the beat and fade timers on unmount
   useEffect(() => () => layer.dispose(), [layer]);
 
   return <div ref={setElement} className="pointer-events-none absolute inset-0 overflow-hidden" />;

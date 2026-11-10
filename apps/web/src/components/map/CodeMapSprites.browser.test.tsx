@@ -191,11 +191,100 @@ it("stands on every file of a fast burst in order and lands on the last one soon
     );
     watch(100);
   }
+  expect(root.dataset.look).toBeDefined();
   watch(500);
 
   expect(stood).toEqual([A, B, C, A, B, C]);
   expect(standingOn(root)).toBe(C);
   expect(said).toEqual(["Edit ChatView.tsx", "Edit index.css"]);
   expect(root.firstElementChild!.className).not.toContain("code-map-walk");
+  expect(root.dataset.look).toBeUndefined();
+  // The working sprite's beat predates the fake clock, so this counts walk frames only.
   expect(vi.getTimerCount()).toBe(0);
+});
+
+const inState = (state: SpriteInput["state"]): SpriteInput => ({ ...agent(A), state });
+const stopAnimations = (...elements: ReadonlyArray<Element>) => {
+  for (const element of elements)
+    for (const animation of element.getAnimations()) animation.cancel();
+};
+
+it("steps a thinking sprite's cloud and taps a working one on a beat that stops when all are idle", async () => {
+  const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
+  await using screen = await render(
+    <CodeMapSprites sprites={[inState("idle")]} world={world} camera={camera} {...idle} />,
+  );
+  using _clock = fakeTimers();
+  const root = spriteOf(screen.container, "root")!;
+  const body = root.firstElementChild!;
+  const cloud = root.querySelector('[data-testid="code-map-cloud"]')!;
+  const litDot = () =>
+    [...cloud.querySelectorAll("i")].findIndex((dot) => dot.dataset.lit !== undefined);
+  expect(getComputedStyle(body.querySelector("i")!).transform).toBe("matrix(1, 0, 0, 0.14, 0, 0)");
+  expect(getComputedStyle(cloud).visibility).toBe("hidden");
+  expect(vi.getTimerCount()).toBe(0);
+
+  await screen.rerender(
+    <CodeMapSprites sprites={[inState("thinking")]} world={world} camera={camera} {...idle} />,
+  );
+  expect(root.dataset.state).toBe("thinking");
+  expect(vi.getTimerCount()).toBe(1);
+  const lit = [litDot()];
+  for (let beat = 0; beat < 3; beat++) {
+    vi.advanceTimersByTime(500);
+    lit.push(litDot());
+  }
+  expect(lit).toEqual([0, 1, 2, 0]);
+
+  await screen.rerender(
+    <CodeMapSprites sprites={[inState("working")]} world={world} camera={camera} {...idle} />,
+  );
+  expect(root.dataset.state).toBe("working");
+  stopAnimations(body);
+  vi.advanceTimersByTime(1000);
+  expect(body.getAnimations()).toHaveLength(1);
+  expect(litDot()).toBe(0);
+
+  await screen.rerender(
+    <CodeMapSprites sprites={[inState("idle")]} world={world} camera={camera} {...idle} />,
+  );
+  expect(root.dataset.state).toBe("idle");
+  expect(root.dataset.done).toBeDefined();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("hops a waiting sprite when it starts waiting and every 8 s, blinks it, and stops when it is idle", async () => {
+  const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
+  await using screen = await render(
+    <CodeMapSprites sprites={[inState("idle")]} world={world} camera={camera} {...idle} />,
+  );
+  using _clock = fakeTimers();
+  const root = spriteOf(screen.container, "root")!;
+  const body = root.firstElementChild!;
+  const eye = body.querySelector("i")!;
+
+  await screen.rerender(
+    <CodeMapSprites sprites={[inState("waiting")]} world={world} camera={camera} {...idle} />,
+  );
+  expect(root.querySelector('[data-testid="code-map-waiting"]')).not.toBeNull();
+  expect(body.getAnimations()).toHaveLength(1);
+
+  stopAnimations(body, eye);
+  vi.advanceTimersByTime(3500);
+  expect(eye.getAnimations()).toHaveLength(0);
+  vi.advanceTimersByTime(500);
+  expect(eye.getAnimations()).toHaveLength(1);
+  vi.advanceTimersByTime(3500);
+  expect(body.getAnimations()).toHaveLength(0);
+  vi.advanceTimersByTime(500);
+  expect(body.getAnimations()).toHaveLength(1);
+
+  await screen.rerender(
+    <CodeMapSprites sprites={[inState("idle")]} world={world} camera={camera} {...idle} />,
+  );
+  expect(root.dataset.done).toBeUndefined();
+  expect(vi.getTimerCount()).toBe(0);
+  stopAnimations(body);
+  vi.advanceTimersByTime(8000);
+  expect(body.getAnimations()).toHaveLength(0);
 });
