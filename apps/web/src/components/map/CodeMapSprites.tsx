@@ -206,6 +206,11 @@ function createSpriteLayer() {
   const beginHover = (walker: Walker) => {
     if (hover?.walker === walker || walker.leaving) return;
     endHover();
+    // A stroll would walk the sprite out from under its hover card.
+    if (walker.strayed && walker.leg) {
+      halt(walker);
+      look(walker, 0, 0);
+    }
     const timer = setTimeout(() => {
       if (hover?.walker !== walker || !container) return;
       hover.reported = true;

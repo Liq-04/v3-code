@@ -5,7 +5,7 @@ import { expect, it, vi } from "vite-plus/test";
 import "~/index.css";
 import { fakeTimers, render } from "../../../test/render";
 
-import { CodeMapSprites, type SpriteInput } from "./CodeMapSprites";
+import { CodeMapSprites, type SpriteHover, type SpriteInput } from "./CodeMapSprites";
 import { createCameraStore } from "./mapCamera";
 import { buildWorld, rectOf } from "./mapWorld";
 
@@ -428,6 +428,35 @@ it("strolls an idle sprite whose turn just ended without moving its place, walks
   }
   expect([...stood]).toEqual([B]);
   expect(saidOnLanding).toEqual(["Edit git.ts"]);
+});
+
+it("stops a stroll where the pointer catches the sprite, so its hover card stays on it", async () => {
+  const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
+  const onHover = vi.fn<(hover: SpriteHover | null) => void>();
+  const handlers = { onHover, onOpen: () => {} };
+  await using screen = await render(
+    <CodeMapSprites sprites={[]} world={world} camera={camera} {...handlers} />,
+  );
+  using _clock = fakeTimers({ now: NOW });
+  using _random = vi.spyOn(Math, "random").mockReturnValue(0);
+  await screen.rerender(
+    <CodeMapSprites sprites={[rested(0)]} world={world} camera={camera} {...handlers} />,
+  );
+  const root = spriteOf(screen.container, "root")!;
+  vi.advanceTimersByTime(8300);
+  expect(root.firstElementChild!.className).toContain("code-map-walk");
+
+  root.dispatchEvent(new PointerEvent("pointerenter"));
+  const caught = positionOf(root);
+  vi.advanceTimersByTime(1000);
+  expect(positionOf(root)).toEqual(caught);
+  expect(root.firstElementChild!.className).not.toContain("code-map-walk");
+  const layer = root.parentElement!.getBoundingClientRect();
+  const box = root.getBoundingClientRect();
+  expect(onHover).toHaveBeenLastCalledWith({
+    threadId: "root",
+    rect: { x: box.left - layer.left, y: box.top - layer.top, w: box.width, h: box.height },
+  });
 });
 
 it("strolls an awake idle sprite around its file, puts it back when the map is laid out again, and home to sleep after 5 minutes", async () => {
