@@ -148,7 +148,9 @@ loud in an ElevenLabs voice. During the call the agent is asked to read and
 investigate but leave changes for later; it keeps the thread's usual permissions.
 Each line you say is a real message to the agent, so it costs a turn like a typed
 one. When you hang up, the agent gets one more turn to do what you agreed on the
-call, and a summary lands in the thread with the transcript behind it.
+call, and a summary lands in the thread with the transcript behind it. The agent's
+tool calls show in that transcript, collapsed, where it made them, so a long call
+reads in order.
 A call that drops, or ends because the thread was archived, gets the summary but no
 follow-up turn.
 
@@ -164,7 +166,8 @@ command palette, or `mod+alt+shift+d`. A call strip docks above the composer wit
 what the call is doing, a mute button, and **End**. You can still type while on a
 call; the composer says **Type to cut in**, and the agent answers aloud. **On a
 call** shows in the thread header on every device viewing the thread, with **End**,
-so you can hang up from a device that is not holding the audio. If the server
+so you can hang up from a device that is not holding the audio. The sidebar and the
+mobile thread list show **On a call** beside the thread too. If the server
 restarts mid-call, the call ends without a summary; the lines you said stay in the
 thread.
 
