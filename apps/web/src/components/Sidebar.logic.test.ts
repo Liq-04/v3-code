@@ -42,7 +42,14 @@ import {
 } from "@t3tools/client-runtime/state/thread-sort";
 import { resolveProjectExpanded } from "../uiStateStore";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
-import { EnvironmentId, ProjectId, ProviderInstanceId, RunId, ThreadId } from "@t3tools/contracts";
+import {
+  DiscussionId,
+  EnvironmentId,
+  ProjectId,
+  ProviderInstanceId,
+  RunId,
+  ThreadId,
+} from "@t3tools/contracts";
 
 import {
   DEFAULT_INTERACTION_MODE,
@@ -428,6 +435,33 @@ describe("resolveThreadStatusPill", () => {
     expect(resolveThreadStatusPill({ thread: resumed })).toMatchObject({
       label: "Working",
       pulse: true,
+    });
+  });
+
+  it("says on a call, without a pulse, whether or not a turn is running, below approvals", () => {
+    const discussion = {
+      id: DiscussionId.make("discussion:call"),
+      startedAt: "2026-03-09T10:00:00.000Z",
+      heldBy: "desktop",
+    };
+    const idle = { ...baseThread.runtime, status: "idle" as const, activeRunId: null };
+    for (const runtime of [baseThread.runtime, idle]) {
+      expect(
+        resolveThreadStatusPill({ thread: { ...baseThread, runtime, discussion } }),
+      ).toMatchObject({ label: "On a call", pulse: false });
+    }
+    expect(
+      resolveThreadStatusPill({
+        thread: { ...baseThread, discussion, pendingGuestMessageCount: 1 },
+      }),
+    ).toMatchObject({ label: "On a call" });
+    expect(
+      resolveThreadStatusPill({
+        thread: { ...baseThread, discussion, hasPendingApprovals: true },
+      }),
+    ).toMatchObject({ label: "Pending Approval" });
+    expect(resolveThreadStatusPill({ thread: { ...baseThread, discussion: null } })).toMatchObject({
+      label: "Working",
     });
   });
 
