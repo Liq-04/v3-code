@@ -10,6 +10,7 @@ import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  CODE_MAP_DOCK,
   changesFingerprint,
   checkoutRelativePath,
   deriveCodeMap,
@@ -308,7 +309,10 @@ describe("deriveCodeMap", () => {
     expect(model.sprites.map((sprite) => [sprite.threadId, sprite.state, sprite.path])).toEqual([
       ["idle", "idle", ORCH],
       ["asks", "waiting", ORCH],
+      // A thread that names no file of the map yet still shows, at the dock.
+      ["nowhere", "idle", null],
     ]);
+    expect(model.sprites.find((sprite) => sprite.threadId === "nowhere")?.home).toBe(CODE_MAP_DOCK);
     expect(model.threads).toEqual([]);
   });
 
@@ -327,7 +331,7 @@ describe("deriveCodeMap", () => {
     ).toEqual([["elsewhere", "idle", null, "apps/web/src/App.tsx"]]);
   });
 
-  it("gives a running thread whose activeFile is absent a sprite with no new position", () => {
+  it("stands a new running thread with no file at the dock", () => {
     const model = derive([thread("a", { worktree: "/wt/a", running: true })], {});
     expect(model.sprites).toEqual([
       {
@@ -336,7 +340,7 @@ describe("deriveCodeMap", () => {
         parentThreadId: null,
         colorThreadId: "a",
         path: null,
-        home: null,
+        home: CODE_MAP_DOCK,
         op: null,
         state: "working",
       },

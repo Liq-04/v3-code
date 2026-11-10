@@ -1,4 +1,4 @@
-import type { CodeMapSprite } from "@t3tools/client-runtime/state/code-map";
+import { CODE_MAP_DOCK, type CodeMapSprite } from "@t3tools/client-runtime/state/code-map";
 import type { ThreadId } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 
@@ -163,14 +163,19 @@ function createSpriteLayer() {
   };
 
   const anchor = (walker: Walker, path: string): Point | null => {
-    const file = world?.files.get(path);
-    if (!file || !camera) return null;
+    if (!world || !camera) return null;
     let lane = 0;
     for (const other of walkers.values()) {
       if (other !== walker && other.targetPath === path && !other.leaving) lane++;
     }
     const { scale } = camera.get();
     const step = walker.input.kind === "agent" ? 14 : 8;
+    if (path === CODE_MAP_DOCK) {
+      const { root } = world;
+      return { x: root.x + (20 + lane * 30) / scale, y: root.y + root.headerHeight + 26 / scale };
+    }
+    const file = world.files.get(path);
+    if (!file) return null;
     return {
       x: file.x + file.w / 2 + (lane * step) / scale,
       y: file.y + Math.min(file.h * 0.35, 12 / scale),

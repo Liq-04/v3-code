@@ -67,12 +67,18 @@ export interface CodeMapSprite {
   readonly colorThreadId: ThreadId;
   /** Null means the latest touch named no path inside a checkout: keep the sprite where it was. */
   readonly path: string | null;
-  /** Where a sprite with no position yet stands: its thread's busiest listed change. */
+  /**
+   * Where a sprite with no position yet stands: its thread's busiest listed change, or the dock
+   * for a thread with none. Null for a subagent, which starts at its parent.
+   */
   readonly home: string | null;
   readonly op: "read" | "edit" | null;
   /** Waiting is on the user: an approval, a question, or a plan to accept. Subagents only work. */
   readonly state: "working" | "waiting" | "idle";
 }
+
+/** The repository root: where a thread that names no file of the map yet stands. */
+export const CODE_MAP_DOCK = "";
 
 export interface CodeMapRead {
   readonly path: string;
@@ -407,7 +413,7 @@ export function deriveCodeMap(input: DeriveCodeMapInput): CodeMap {
   for (const { thread, kind, parentThreadId, colorThreadId, state } of collectActors(input)) {
     const active = thread.source.activeFile;
     const path = active ? checkoutRelativePath(active.path, roots) : null;
-    const home = busiest.get(thread.id)?.path ?? null;
+    const home = busiest.get(thread.id)?.path ?? (kind === "agent" ? CODE_MAP_DOCK : null);
     // A thread that stopped has nowhere to stand until a file of the map names its place.
     if (state !== "working" && path === null && home === null) continue;
     sprites.push({

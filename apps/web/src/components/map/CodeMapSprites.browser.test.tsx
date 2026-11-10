@@ -1,3 +1,4 @@
+import { CODE_MAP_DOCK } from "@t3tools/client-runtime/state/code-map";
 import { ThreadId } from "@t3tools/contracts";
 import { expect, it, vi } from "vite-plus/test";
 
@@ -122,4 +123,33 @@ it("repositions sprites when the camera moves without restarting a walk", async 
   camera.jumpTo({ x: 50, y: 0, scale: 2 });
   expect(translateX(root)).toBeCloseTo(x * 2 + 50, 2);
   expect(root.firstElementChild!.className).not.toContain("code-map-walk");
+});
+
+it("stands a thread with no file at the dock and walks it off once a file names its place", async () => {
+  const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
+  await using screen = await render(
+    <CodeMapSprites
+      sprites={[{ ...agent(null), home: CODE_MAP_DOCK }]}
+      world={world}
+      camera={camera}
+      {...idle}
+    />,
+  );
+  const root = spriteOf(screen.container, "root")!;
+  expect(root.style.visibility).toBe("");
+  expect(translateX(root)).toBeLessThan(world.root.x + 60);
+
+  using _clock = fakeTimers();
+  await screen.rerender(
+    <CodeMapSprites
+      sprites={[{ ...agent(A), home: CODE_MAP_DOCK }]}
+      world={world}
+      camera={camera}
+      {...idle}
+    />,
+  );
+  vi.advanceTimersByTime(2000);
+  expect(root.dataset.path).toBe(A);
+  const target = rectOf(world, A)!;
+  expect(translateX(root)).toBeGreaterThan(target.x);
 });
