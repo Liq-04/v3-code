@@ -79,6 +79,8 @@ function thread(
     snoozedUntil?: string;
     waiting?: boolean;
     toolRunning?: boolean;
+    /** When the thread's latest run ended. */
+    completedAt?: string;
     active?: { path: string; op: "read" | "edit"; at?: string };
   } = {},
 ): CodeMapThreadInput {
@@ -107,7 +109,16 @@ function thread(
     settledOverride: opts.settled ? "settled" : null,
     snoozedUntil: opts.snoozedUntil ?? null,
     snoozedAt: null,
-    latestRun: null,
+    latestRun: opts.completedAt
+      ? {
+          runId: RunId.make(`run:${id}`),
+          status: "completed",
+          requestedAt: null,
+          startedAt: null,
+          completedAt: opts.completedAt,
+          assistantMessageId: null,
+        }
+      : null,
     runtime: status
       ? {
           status,
@@ -209,6 +220,7 @@ describe("deriveCodeMap", () => {
         home: { kind: "file", path: ORCH },
         op: "edit",
         state: "working",
+        idleSince: null,
       },
     ]);
   });
@@ -359,6 +371,27 @@ describe("deriveCodeMap", () => {
     expect(model.reads).toEqual([{ path: ORCH, threadIds: ids("thinks") }]);
   });
 
+  it("says when an idle thread's turn ended, and nothing for one that works or never ran", () => {
+    const ENDED = "2026-06-01T11:58:00.000Z";
+    const model = derive(
+      [
+        thread("rested", { worktree: "/wt/rested", completedAt: ENDED }),
+        thread("fresh", { worktree: "/wt/fresh" }),
+        thread("busy", { worktree: "/wt/busy", running: true, completedAt: ENDED }),
+        thread("asks", { worktree: "/wt/asks", waiting: true, completedAt: ENDED }),
+      ],
+      {},
+    );
+    expect(
+      model.sprites.map((sprite) => [sprite.threadId, sprite.state, sprite.idleSince]),
+    ).toEqual([
+      ["rested", "idle", Date.parse(ENDED)],
+      ["fresh", "idle", null],
+      ["busy", "working", null],
+      ["asks", "waiting", null],
+    ]);
+  });
+
   it("stands a thread whose last file is outside every checkout on its busiest change", () => {
     const model = derive(
       [
@@ -386,6 +419,7 @@ describe("deriveCodeMap", () => {
         home: CODE_MAP_DOCK,
         op: null,
         state: "working",
+        idleSince: null,
       },
     ]);
   });
@@ -613,6 +647,7 @@ describe("subagents", () => {
           home: null,
           op: "read",
           state: "working",
+          idleSince: null,
         },
       ],
     },
@@ -641,6 +676,7 @@ describe("subagents", () => {
           home: null,
           op: null,
           state: "working",
+          idleSince: null,
         },
         {
           threadId: "t",
@@ -651,6 +687,7 @@ describe("subagents", () => {
           home: null,
           op: null,
           state: "working",
+          idleSince: null,
         },
       ],
     },

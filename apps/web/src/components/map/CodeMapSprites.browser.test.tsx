@@ -40,6 +40,7 @@ const agent = (path: string | null): SpriteInput => ({
   quiet: false,
   title: "Root",
   state: "working",
+  idleSince: null,
 });
 
 const subagent = (path: string | null): SpriteInput => ({
@@ -53,6 +54,7 @@ const subagent = (path: string | null): SpriteInput => ({
   quiet: false,
   title: "Explore",
   state: "working",
+  idleSince: null,
 });
 
 const idle = { onHover: () => {}, onOpen: () => {} };
@@ -351,4 +353,101 @@ it("holds the thinking cloud back while files keep coming and shows it once they
   vi.advanceTimersByTime(2500);
   expect(root.dataset.state).toBe("thinking");
   expect(root.dataset.busy).toBeUndefined();
+});
+
+const AWAKE_MS = 5 * 60_000;
+const NOW = Date.parse("2026-06-01T12:00:00.000Z");
+/** An idle sprite whose turn ended this long before the fake clock's start. */
+const rested = (endedAgoMs: number): SpriteInput => ({
+  ...agent(A),
+  state: "idle",
+  idleSince: NOW - endedAgoMs,
+});
+
+it("strolls an idle sprite whose turn just ended without moving its place, and walks it back to work", async () => {
+  const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
+  // Mounted empty so the shared beat starts under the fake clock.
+  await using screen = await render(
+    <CodeMapSprites sprites={[]} world={world} camera={camera} {...idle} />,
+  );
+  using _clock = fakeTimers({ now: NOW });
+  // The shortest wait, due east, the shortest reach.
+  using _random = vi.spyOn(Math, "random").mockReturnValue(0);
+  await screen.rerender(
+    <CodeMapSprites sprites={[rested(0)]} world={world} camera={camera} {...idle} />,
+  );
+  const root = spriteOf(screen.container, "root")!;
+  const body = root.firstElementChild!;
+  expect(root.dataset.state).toBe("awake");
+  expect(getComputedStyle(body.querySelector("i")!).transform).toBe("none");
+  expect(getComputedStyle(root.querySelector('[data-testid="code-map-cloud"]')!).visibility).toBe(
+    "hidden",
+  );
+  expect(standingOn(root)).toBe(A);
+  expect(vi.getTimerCount()).toBe(1);
+
+  vi.advanceTimersByTime(7500);
+  expect(standingOn(root)).toBe(A);
+  // No tap: the body has not moved in 15 beats.
+  expect(body.getAnimations()).toHaveLength(0);
+  vi.advanceTimersByTime(3000);
+  const home = rectOf(world, A)!;
+  expect(translateX(root)).toBeGreaterThan(home.x + home.w / 2 + 30);
+  expect(body.className).not.toContain("code-map-walk");
+  // A stroll is not work: no bubble, no reading face, and the place is unchanged.
+  expect(root.querySelector('[data-testid="code-map-say"]')).toBeNull();
+  expect(root.dataset.busy).toBeUndefined();
+  expect(root.dataset.path).toBe(A);
+  expect(root.getAttribute("aria-label")).toBe(`Root at ${A}`);
+  expect(vi.getTimerCount()).toBe(1);
+
+  await screen.rerender(
+    <CodeMapSprites sprites={[agent(A)]} world={world} camera={camera} {...idle} />,
+  );
+  vi.advanceTimersByTime(2000);
+  expect(root.dataset.state).toBe("working");
+  expect(standingOn(root)).toBe(A);
+});
+
+it("puts an awake idle sprite back on its file when the map is laid out again, and to sleep after 5 minutes", async () => {
+  const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
+  // Mounted empty so the shared beat starts under the fake clock.
+  await using screen = await render(
+    <CodeMapSprites sprites={[]} world={world} camera={camera} {...idle} />,
+  );
+  using _clock = fakeTimers({ now: NOW });
+  using _random = vi.spyOn(Math, "random").mockReturnValue(0);
+  const sprite = rested(60_000);
+  await screen.rerender(
+    <CodeMapSprites sprites={[sprite]} world={world} camera={camera} {...idle} />,
+  );
+  const root = spriteOf(screen.container, "root")!;
+  vi.advanceTimersByTime(10_000);
+  expect(standingOn(root)).toBeNull();
+
+  await screen.rerender(
+    <CodeMapSprites sprites={[sprite]} world={resized} camera={camera} {...idle} />,
+  );
+  const file = rectOf(resized, A)!;
+  expect(translateX(root)).toBeCloseTo(file.x + file.w / 2, 2);
+
+  vi.advanceTimersByTime(AWAKE_MS - 60_000 - 10_000 - 500);
+  expect(root.dataset.state).toBe("awake");
+  expect(vi.getTimerCount()).toBeGreaterThan(0);
+  vi.advanceTimersByTime(2500);
+  expect(root.dataset.state).toBe("idle");
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("shows an idle sprite whose turn ended more than 5 minutes ago asleep at once, with no beat", async () => {
+  const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
+  await using screen = await render(
+    <CodeMapSprites sprites={[]} world={world} camera={camera} {...idle} />,
+  );
+  using _clock = fakeTimers({ now: NOW });
+  await screen.rerender(
+    <CodeMapSprites sprites={[rested(AWAKE_MS + 1)]} world={world} camera={camera} {...idle} />,
+  );
+  expect(spriteOf(screen.container, "root")!.dataset.state).toBe("idle");
+  expect(vi.getTimerCount()).toBe(0);
 });

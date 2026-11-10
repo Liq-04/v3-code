@@ -78,6 +78,8 @@ export interface CodeMapSprite {
    * a question, or a plan to accept. A subagent only works: its shell hears no tool traffic.
    */
   readonly state: "working" | "thinking" | "waiting" | "idle";
+  /** When an idle thread's latest run ended, in epoch ms. Null in any other state or with no such run. */
+  readonly idleSince: number | null;
 }
 
 /** Somewhere a sprite can stand: on a file of the map, or at the dock by the repository root. */
@@ -266,6 +268,11 @@ const busyStateOf = (thread: CodeMapThreadInput) =>
     ? "thinking"
     : "working";
 
+const turnEndedAt = (thread: CodeMapThreadInput) => {
+  const at = thread.latestRun?.completedAt;
+  return at ? Date.parse(at) : null;
+};
+
 const isBusy = (state: CodeMapSprite["state"]) => state === "working" || state === "thinking";
 
 /** Null for a parked thread: settled or snoozed, the sidebar's rule. A working one is never parked. */
@@ -448,6 +455,7 @@ export function deriveCodeMap(input: DeriveCodeMapInput): CodeMap {
       home,
       op: active?.op ?? null,
       state,
+      idleSince: state === "idle" ? turnEndedAt(thread) : null,
     });
     if (!isBusy(state)) continue;
     const observed = input.observedReads.get(thread.id);

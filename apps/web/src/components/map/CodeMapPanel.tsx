@@ -136,6 +136,7 @@ function toSpriteInput(
     quiet: scope === "thread" && sprite.threadId !== threadId && sprite.colorThreadId !== threadId,
     title: titleOf(sprite.threadId),
     state: sprite.state,
+    idleSince: sprite.idleSince,
   };
 }
 

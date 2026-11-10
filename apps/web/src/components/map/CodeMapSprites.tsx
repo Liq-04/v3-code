@@ -17,7 +17,11 @@ export interface SpriteInput {
   readonly quiet: boolean;
   readonly title: string;
   readonly state: CodeMapSprite["state"];
+  readonly idleSince: number | null;
 }
+
+/** What a sprite acts out. An idle one is awake for a while after its turn ends, then asleep. */
+type Mood = Exclude<CodeMapSprite["state"], "idle"> | "awake" | "asleep";
 
 export interface SpriteHover {
   readonly threadId: ThreadId;
@@ -46,6 +50,9 @@ interface Leg {
   readonly onArrive: (() => void) | null;
 }
 
+/** A paced leg fits the time until the next path is likely to land; an amble is a slow stroll. */
+type Gait = "paced" | "walk" | "amble";
+
 interface Stop {
   readonly place: CodeMapPlace;
   /** The bubble for landing here, or null for a sprite that does not speak. */
@@ -67,10 +74,15 @@ interface Walker {
   paceMs: number | null;
   pathChangedAt: number | null;
   pose: Animation | null;
+  mood: Mood;
   /** Offsets this walker's blinks and taps on the shared beat so sprites do not move in step. */
   readonly phase: number;
-  /** The beat on which the walker entered its state. */
-  stateBeat: number;
+  /** The beat on which the walker entered its mood. */
+  moodBeat: number;
+  /** The beat on which an awake walker next strolls. */
+  strollBeat: number;
+  /** A stroll took the walker off its place. */
+  strayed: boolean;
   leaving: boolean;
 }
 
@@ -95,12 +107,28 @@ const CLOUD_DOTS = 3;
 // Reads finish faster than the shell can show a tool running, so a sprite that just named a
 // file is still busy reading; the cloud waits until the files stop coming.
 const READ_SETTLE_MS = 1500;
+// A fixed stand-in for the provider's prompt-cache window.
+const AWAKE_MS = 5 * 60_000;
+const STROLL_MIN_BEATS = 16;
+const STROLL_MAX_BEATS = 28;
+const STROLL_MIN_PX = 40;
+const STROLL_MAX_PX = 90;
+const STROLL_EDGE_PX = 24;
+const AMBLE_MS_PER_PX = 18;
 
 const easeInOutQuad = (u: number) => (u < 0.5 ? 2 * u * u : 1 - (-2 * u + 2) ** 2 / 2);
 const easeOutCubic = (u: number) => 1 - (1 - u) ** 3;
 
 const samePlace = (a: CodeMapPlace | null, b: CodeMapPlace) =>
   a !== null && (a.kind === "file" ? b.kind === "file" && a.path === b.path : b.kind === "dock");
+
+const moodOf = (input: SpriteInput, now: number): Mood => {
+  if (input.state !== "idle") return input.state;
+  return input.idleSince !== null && now - input.idleSince < AWAKE_MS ? "awake" : "asleep";
+};
+
+const between = (min: number, max: number) => min + Math.random() * (max - min);
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 const reducedMotion = () =>
   typeof window.matchMedia === "function" &&
@@ -295,36 +323,42 @@ function createSpriteLayer() {
     }
   };
 
+  const act = (walker: Walker) => {
+    const { mood } = walker;
+    const own = beat + walker.phase;
+    if (mood === "thinking") {
+      walker.el.querySelectorAll<HTMLElement>(".code-map-cloud i").forEach((dot, index) => {
+        dot.toggleAttribute("data-lit", index === beat % CLOUD_DOTS);
+      });
+    }
+    if (mood === "working" && own % TAP_EVERY_BEATS === 0 && !walker.leg) tap(walker);
+    if (mood === "waiting" && (beat - walker.moodBeat) % HOP_EVERY_BEATS === 0) hop(walker);
+    if (mood === "awake" && beat >= walker.strollBeat) stroll(walker);
+    if (own % BLINK_EVERY_BEATS === 0) blink(walker);
+  };
+
   const onBeat = () => {
     beat++;
     const now = performance.now();
+    const wallNow = Date.now();
+    const still = reducedMotion();
     for (const walker of walkers.values()) {
       const settled = now - (walker.pathChangedAt ?? 0) >= READ_SETTLE_MS;
       if (walker.el.dataset.busy !== undefined && !walker.leg && settled) {
         delete walker.el.dataset.busy;
       }
+      const mood = moodOf(walker.input, wallNow);
+      if (mood !== walker.mood) paintMood(walker, mood);
+      if (!still && !walker.leaving && mood !== "asleep") act(walker);
     }
-    if (reducedMotion()) return;
-    for (const walker of walkers.values()) {
-      const { state } = walker.input;
-      if (walker.leaving || state === "idle") continue;
-      const own = beat + walker.phase;
-      if (state === "thinking") {
-        walker.el.querySelectorAll<HTMLElement>(".code-map-cloud i").forEach((dot, index) => {
-          dot.toggleAttribute("data-lit", index === beat % CLOUD_DOTS);
-        });
-      }
-      if (state === "working" && own % TAP_EVERY_BEATS === 0 && !walker.leg) tap(walker);
-      if (state === "waiting" && (beat - walker.stateBeat) % HOP_EVERY_BEATS === 0) hop(walker);
-      if (own % BLINK_EVERY_BEATS === 0) blink(walker);
-    }
+    syncBeat();
   };
 
-  /** The beat runs only while some sprite is in a state that moves on it. */
+  /** The beat runs only while some sprite is in a mood that moves on it. */
   const syncBeat = () => {
     let needed = false;
     for (const walker of walkers.values()) {
-      needed ||= !walker.leaving && walker.input.state !== "idle";
+      needed ||= !walker.leaving && walker.mood !== "asleep";
     }
     if (needed && beatTimer === null) {
       beatTimer = setInterval(onBeat, BEAT_MS);
@@ -362,7 +396,7 @@ function createSpriteLayer() {
       return;
     }
     look(walker, 0, 0);
-    if (walker.input.state !== "idle") blink(walker);
+    if (walker.mood !== "asleep") blink(walker);
     void walker.body.offsetWidth;
     walker.body.classList.add("code-map-land");
     leg.onArrive?.();
@@ -395,7 +429,7 @@ function createSpriteLayer() {
     walker: Walker,
     to: Point,
     now: number,
-    paced: boolean,
+    gait: Gait,
     onArrive: (() => void) | null,
   ): Leg | null => {
     if (!camera) return null;
@@ -415,8 +449,11 @@ function createSpriteLayer() {
       onArrive?.();
       return null;
     }
-    const walkMs = Math.min(MAX_WALK_MS, WALK_BASE_MS + distance * WALK_MS_PER_PX);
-    const budgetMs = (paced ? legBudget(walker) : null) ?? walkMs;
+    const walkMs =
+      gait === "amble"
+        ? distance * AMBLE_MS_PER_PX
+        : Math.min(MAX_WALK_MS, WALK_BASE_MS + distance * WALK_MS_PER_PX);
+    const budgetMs = (gait === "paced" ? legBudget(walker) : null) ?? walkMs;
     const durationMs = Math.min(walkMs, budgetMs);
     const dash = budgetMs < walkMs && distance > DASH_MIN_PX;
     // A leg hurried mid-stride is already moving, so it skips the squash.
@@ -458,7 +495,13 @@ function createSpriteLayer() {
       const to = anchor(walker, stop.place);
       if (!to) continue;
       const text = stop.say;
-      const leg = startLeg(walker, to, now, true, text === null ? null : () => say(walker, text));
+      const leg = startLeg(
+        walker,
+        to,
+        now,
+        "paced",
+        text === null ? null : () => say(walker, text),
+      );
       if (leg) return leg;
     }
     return null;
@@ -484,8 +527,29 @@ function createSpriteLayer() {
     const budgetMs = legBudget(walker);
     const remainingMs = leg.startedAt + leg.holdMs + leg.moveMs - now;
     if (budgetMs !== null && remainingMs > budgetMs) {
-      startLeg(walker, leg.to, now, true, leg.onArrive);
+      startLeg(walker, leg.to, now, "paced", leg.onArrive);
     }
+  };
+
+  const nextStrollBeat = () => beat + Math.round(between(STROLL_MIN_BEATS, STROLL_MAX_BEATS));
+
+  /** A short amble to a random spot nearby. It leaves the walker's place as it was. */
+  const stroll = (walker: Walker) => {
+    walker.strollBeat = nextStrollBeat();
+    const from = walker.worldPos;
+    if (!world || !camera || !from || walker.leg || hover?.walker === walker) return;
+    const { scale } = camera.get();
+    const angle = between(0, Math.PI * 2);
+    const reach = between(STROLL_MIN_PX, STROLL_MAX_PX) / scale;
+    const edge = STROLL_EDGE_PX / scale;
+    const to = {
+      x: clamp(from.x + Math.cos(angle) * reach, edge, world.width - edge),
+      y: clamp(from.y + Math.sin(angle) * reach, edge, world.height - edge),
+    };
+    // A cornered walker has nowhere to go this time.
+    if (Math.hypot(to.x - from.x, to.y - from.y) * scale < STROLL_MIN_PX / 2) return;
+    walker.strayed = true;
+    startLeg(walker, to, performance.now(), "amble", null);
   };
 
   const remove = (walker: Walker) => {
@@ -504,16 +568,18 @@ function createSpriteLayer() {
     fades.add(timer);
   };
 
-  // index.css draws each state's eyes and cloud from these attributes.
-  const paintState = (walker: Walker) => {
-    const { input, el, body } = walker;
-    const finished = el.dataset.state === "working" || el.dataset.state === "thinking";
-    el.dataset.state = input.state;
-    el.toggleAttribute("data-done", finished && input.state === "idle");
-    walker.stateBeat = beat;
-    body.classList.toggle("opacity-70", input.state === "idle");
+  // index.css draws each mood's eyes and cloud from these attributes. Asleep paints as idle.
+  const paintMood = (walker: Walker, mood: Mood) => {
+    const { el, body } = walker;
+    const finished = walker.mood === "working" || walker.mood === "thinking";
+    walker.mood = mood;
+    el.dataset.state = mood === "asleep" ? "idle" : mood;
+    el.toggleAttribute("data-done", finished && walker.input.state === "idle");
+    walker.moodBeat = beat;
+    if (mood === "awake") walker.strollBeat = nextStrollBeat();
+    body.classList.toggle("opacity-70", mood === "asleep");
     body.querySelector("[data-testid=code-map-waiting]")?.remove();
-    if (input.state !== "waiting") return;
+    if (mood !== "waiting") return;
     const badge = document.createElement("span");
     badge.dataset.testid = "code-map-waiting";
     badge.className = WAITING_BADGE_CLASS;
@@ -525,7 +591,8 @@ function createSpriteLayer() {
 
   const apply = (walker: Walker, input: SpriteInput) => {
     walker.input = input;
-    if (walker.el.dataset.state !== input.state) paintState(walker);
+    const mood = moodOf(input, Date.now());
+    if (walker.mood !== mood) paintMood(walker, mood);
     walker.body.style.background = input.color;
     walker.el.style.setProperty("--code-map-color", input.color);
     walker.el.classList.toggle("opacity-50", input.quiet);
@@ -558,13 +625,17 @@ function createSpriteLayer() {
       paceMs: null,
       pathChangedAt: null,
       pose: null,
+      mood: "asleep",
       phase: spawned++,
-      stateBeat: beat,
+      moodBeat: beat,
+      strollBeat: beat,
+      strayed: false,
       leaving: false,
     };
     walkers.set(input.threadId, walker);
     listen(walker);
     container?.appendChild(el);
+    paintMood(walker, moodOf(input, Date.now()));
     return walker;
   };
 
@@ -576,6 +647,7 @@ function createSpriteLayer() {
         halt(walker);
         look(walker, 0, 0);
         walker.stops.length = 0;
+        walker.strayed = false;
         walker.worldPos = walker.place && anchor(walker, walker.place);
         project(walker);
         if (interrupted && walker.leaving) fadeOut(walker);
@@ -586,6 +658,12 @@ function createSpriteLayer() {
       seen.add(input.threadId);
       const existing = walkers.get(input.threadId);
       const walker = existing ?? spawn(input);
+      // Work resumed: the stroll ends, and the walker heads to the file it names or back to its own.
+      const returning = walker.strayed && input.state !== "idle";
+      if (returning) {
+        walker.strayed = false;
+        halt(walker);
+      }
       const named: CodeMapPlace | null =
         input.path === null ? null : { kind: "file", path: input.path };
       const to = named && !samePlace(walker.place, named) ? anchor(walker, named) : null;
@@ -608,6 +686,8 @@ function createSpriteLayer() {
         }
       }
       walker.worldPos ??= besideParent(input);
+      const back = returning && !walker.leg && walker.place ? anchor(walker, walker.place) : null;
+      if (back) startLeg(walker, back, performance.now(), "walk", null);
       apply(walker, input);
       project(walker);
     }
@@ -620,7 +700,7 @@ function createSpriteLayer() {
       const parentPos = besideParent(walker.input);
       walker.stops.length = 0;
       if (walker.input.kind === "subagent" && parentPos && walker.worldPos) {
-        startLeg(walker, parentPos, performance.now(), false, () => fadeOut(walker));
+        startLeg(walker, parentPos, performance.now(), "walk", () => fadeOut(walker));
       } else {
         fadeOut(walker);
       }
