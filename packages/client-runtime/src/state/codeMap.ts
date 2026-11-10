@@ -1,4 +1,5 @@
 import {
+  isLiveSubagentShell,
   ProjectIconColor,
   repositoryGroupingKeyOf,
   type OrchestrationV2ThreadShell,
@@ -85,7 +86,8 @@ export interface CodeMap {
 
 /** The reads seen arriving on one thread's shell during one run. Paths are absolute. */
 export interface CodeMapReadTrail {
-  readonly runId: RunId;
+  /** Null for a provider-native subagent, whose work runs under no T3 run of its own. */
+  readonly runId: RunId | null;
   /** The active file last folded in, so the same shell value is not counted twice. */
   readonly seen: string;
   readonly paths: ReadonlyArray<string>;
@@ -106,7 +108,24 @@ export type CodeMapThreadInput = Pick<
   | "latestRun"
   | "runtime"
   | "lineage"
-> & { readonly source: Pick<OrchestrationV2ThreadShell, "activeFile" | "activeRunId"> };
+> & {
+  readonly source: Pick<
+    OrchestrationV2ThreadShell,
+    | "activeFile"
+    | "activeRunId"
+    | "status"
+    | "activityRunStatus"
+    | "pendingRuntimeRequest"
+    | "pendingBackgroundTasks"
+  >;
+};
+
+const isSubagent = (thread: CodeMapThreadInput) =>
+  thread.lineage.relationshipToParent === "subagent";
+
+// Provider-native subagents have no T3 runtime or run, so the shell's own liveness decides.
+const isActorWorking = (thread: CodeMapThreadInput) =>
+  isSubagent(thread) ? isLiveSubagentShell(thread.source) : isThreadWorking(thread);
 
 export interface DeriveCodeMapInput {
   readonly snapshot: ProjectCodeMapSnapshot;
@@ -225,9 +244,9 @@ function collectMarkSets(input: MarkSetsInput) {
   }
   for (const thread of input.threads) {
     if (!liveIds.has(thread.id)) continue;
-    if (thread.lineage.relationshipToParent === "subagent") {
+    if (isSubagent(thread)) {
       const rootId = thread.lineage.rootThreadId;
-      if (isThreadWorking(thread) && liveIds.has(rootId)) {
+      if (isActorWorking(thread) && liveIds.has(rootId)) {
         actors.push({ thread, kind: "subagent", parentThreadId: rootId, colorThreadId: rootId });
       }
       continue;
@@ -281,7 +300,8 @@ export function observeReadTrails(
   const working = new Set<ThreadId>();
   for (const thread of threads) {
     const runId = thread.source.activeRunId;
-    if (runId === null || !isLiveThread(thread) || !isThreadWorking(thread)) continue;
+    if (!isLiveThread(thread) || !isActorWorking(thread)) continue;
+    if (runId === null && !isSubagent(thread)) continue;
     working.add(thread.id);
     const active = thread.source.activeFile;
     const seen = active ? `${DateTime.toEpochMillis(active.at)}\n${active.op}\n${active.path}` : "";

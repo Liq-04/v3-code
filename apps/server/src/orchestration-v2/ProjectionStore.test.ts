@@ -1355,6 +1355,17 @@ it.effect("shells name the file the latest tool touched by its absolute path", (
     assert.deepEqual(yield* store.getRunReadPaths({ threadId, runId: rolledBackRun.id }), [
       "/workspace/src/earlier-run.ts",
     ]);
+    // A provider-native subagent's items belong to no T3 run.
+    yield* updateItem({
+      ...itemOn(threadId, 12),
+      runId: null,
+      type: "dynamic_tool",
+      toolName: "Read",
+      input: { file_path: "/workspace/src/native.ts" },
+    });
+    assert.deepEqual(yield* store.getRunReadPaths({ threadId, runId: null }), [
+      "/workspace/src/native.ts",
+    ]);
 
     yield* read(worktreeThreadId, 1, { file_path: "src/d.ts" });
     yield* expectActiveFile(worktreeThreadId, { path: "/worktrees/a/src/d.ts", op: "read" });

@@ -71,10 +71,18 @@ function thread(
     root?: string;
     project?: ProjectId;
     run?: string;
+    /** A provider-native subagent: no T3 runtime or run, live only through its shell status. */
+    native?: boolean;
     active?: { path: string; op: "read" | "edit"; at?: string };
   } = {},
 ): CodeMapThreadInput {
-  const status = opts.running ? "running" : opts.finished ? "completed" : undefined;
+  const status = opts.native
+    ? undefined
+    : opts.running
+      ? "running"
+      : opts.finished
+        ? "completed"
+        : undefined;
   return {
     id: ThreadId.make(id),
     projectId: opts.project ?? PROJECT_ID,
@@ -102,7 +110,11 @@ function thread(
         }
       : null,
     source: {
-      activeRunId: opts.running ? RunId.make(opts.run ?? `run:${id}`) : null,
+      activeRunId: opts.running && !opts.native ? RunId.make(opts.run ?? `run:${id}`) : null,
+      status: opts.running ? "running" : opts.finished ? "completed" : "idle",
+      activityRunStatus: null,
+      pendingRuntimeRequest: null,
+      pendingBackgroundTasks: [],
       activeFile: opts.active && {
         path: opts.active.path,
         op: opts.active.op,
@@ -427,6 +439,26 @@ describe("read trail", () => {
       { path: ORCH, threadIds: ids("a") },
       { path: "README.md", threadIds: ids("a", "b") },
     ]);
+  });
+
+  it("follows a provider-native subagent that has no run of its own", () => {
+    const subagent = (active: { path: string; op: "read"; at: string }) =>
+      thread("s", { subagentOf: "a", native: true, running: true, active });
+    const parent = thread("a", { worktree: "/wt/a", running: true });
+    const shells = [
+      subagent({ path: A, op: "read", at: "2026-06-01T00:00:01.000Z" }),
+      subagent({ path: B, op: "read", at: "2026-06-01T00:00:02.000Z" }),
+    ];
+    let observedReads: ReadonlyMap<ThreadId, CodeMapReadTrail> = new Map();
+    for (const shell of shells) observedReads = observeReadTrails(observedReads, [parent, shell]);
+
+    const model = derive([parent, shells.at(-1)!], {}, { observedReads });
+    expect(model.sprites.find((s) => s.threadId === ThreadId.make("s"))).toMatchObject({
+      kind: "subagent",
+      colorThreadId: "a",
+      path: "README.md",
+    });
+    expect(model.reads).toEqual([{ path: "README.md", threadIds: ids("a") }]);
   });
 
   it("clears when the thread stops running and starts empty on its next run", () => {

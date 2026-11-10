@@ -3828,7 +3828,8 @@ export const OrchestrationV2ThreadTitles = Schema.Record(ThreadId, Schema.String
 
 export const OrchestrationV2GetRunReadPathsInput = Schema.Struct({
   threadId: ThreadId,
-  runId: RunId,
+  /** Null reads a provider-native subagent's items, which belong to no T3 run. */
+  runId: Schema.NullOr(RunId),
 });
 
 /** Distinct absolute paths the run's read tools named, capped to the most recent. */

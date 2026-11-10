@@ -585,7 +585,7 @@ export interface ProjectionStoreV2Shape {
   /** Distinct absolute paths the run's read tools named, most recent first and capped. */
   readonly getRunReadPaths: (input: {
     readonly threadId: ThreadId;
-    readonly runId: RunId;
+    readonly runId: RunId | null;
   }) => Effect.Effect<ReadonlyArray<string>, ProjectionStoreV2Error>;
   readonly getThreadWorktreePaths: (options?: {
     readonly includeArchived?: boolean;
@@ -7444,7 +7444,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
 
     const getRunReadPaths = Effect.fn("ProjectionStore.getRunReadPaths")(function* (input: {
       readonly threadId: ThreadId;
-      readonly runId: RunId;
+      readonly runId: RunId | null;
     }) {
       const threads = yield* sql<{ readonly root: string | null }>`
         SELECT COALESCE(json_extract(t.payload_json, '$.worktreePath'), ${sessionCwdOf("t")}) AS root
@@ -7456,8 +7456,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       const rows = yield* sql<{ readonly payload_json: string }>`
         SELECT touched.payload_json
         FROM orchestration_v2_projection_turn_items touched
-          INDEXED BY orchestration_v2_projection_turn_items_run_ordinal_idx
-        WHERE touched.run_id = ${input.runId}
+          ${input.runId === null ? sql`INDEXED BY orchestration_v2_projection_turn_items_thread_ordinal_idx` : sql`INDEXED BY orchestration_v2_projection_turn_items_run_ordinal_idx`}
+        WHERE ${input.runId === null ? sql`touched.run_id IS NULL` : sql`touched.run_id = ${input.runId}`}
           AND touched.thread_id = ${input.threadId}
           AND ${isFileReadItem("touched")}
         ORDER BY touched.ordinal DESC

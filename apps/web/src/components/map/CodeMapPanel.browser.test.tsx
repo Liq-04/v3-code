@@ -101,6 +101,8 @@ function thread(
     },
     source: {
       activeRunId: opts.running ? RunId.make(`run:${id}`) : null,
+      status: opts.running ? "running" : "idle",
+      pendingRuntimeRequest: null,
       activeFile: opts.active
         ? {
             path: `${root}/${opts.active}`,

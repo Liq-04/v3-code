@@ -495,7 +495,7 @@ export interface OrchestratorV2Shape {
   ) => Effect.Effect<Record<ThreadId, string>, OrchestratorV2Error>;
   readonly getRunReadPaths: (input: {
     readonly threadId: ThreadId;
-    readonly runId: RunId;
+    readonly runId: RunId | null;
   }) => Effect.Effect<ReadonlyArray<string>, OrchestratorV2Error>;
   readonly getThreadEventSequence: (
     threadId: ThreadId,
