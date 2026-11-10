@@ -497,15 +497,26 @@ it("strolls an awake idle sprite around its file, puts it back when the map is l
   expect(vi.getTimerCount()).toBe(0);
 });
 
-it("shows an idle sprite whose turn ended more than 5 minutes ago asleep at once, with no beat", async () => {
+it("shows an idle sprite whose turn ended more than 5 minutes ago asleep at once, and one a fast server clock stamped awake for 5 minutes only", async () => {
   const camera = createCameraStore({ x: 0, y: 0, scale: 1 });
   await using screen = await render(
     <CodeMapSprites sprites={[]} world={world} camera={camera} {...idle} />,
   );
   using _clock = fakeTimers({ now: NOW });
+  using _random = vi.spyOn(Math, "random").mockReturnValue(0);
   await screen.rerender(
     <CodeMapSprites sprites={[rested(AWAKE_MS + 1)]} world={world} camera={camera} {...idle} />,
   );
-  expect(spriteOf(screen.container, "root")!.dataset.state).toBe("idle");
+  const root = spriteOf(screen.container, "root")!;
+  expect(root.dataset.state).toBe("idle");
   expect(vi.getTimerCount()).toBe(0);
+
+  await screen.rerender(
+    <CodeMapSprites sprites={[rested(-2 * AWAKE_MS)]} world={world} camera={camera} {...idle} />,
+  );
+  expect(root.dataset.state).toBe("awake");
+  vi.advanceTimersByTime(AWAKE_MS - 1000);
+  expect(root.dataset.state).toBe("awake");
+  vi.advanceTimersByTime(2000);
+  expect(root.dataset.state).toBe("idle");
 });

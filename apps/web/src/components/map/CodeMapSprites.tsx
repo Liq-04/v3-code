@@ -74,6 +74,8 @@ interface Walker {
   pathChangedAt: number | null;
   pose: Animation | null;
   mood: Mood;
+  /** When an idle walker falls asleep, on this client's clock. */
+  awakeUntil: number;
   /** Offsets this walker's blinks and taps on the shared beat so sprites do not move in step. */
   readonly phase: number;
   /** The beat its mood counts from: waiting hops every so often after it, awake strolls once it comes. */
@@ -118,15 +120,18 @@ const easeOutCubic = (u: number) => 1 - (1 - u) ** 3;
 const samePlace = (a: CodeMapPlace | null, b: CodeMapPlace) =>
   a !== null && (a.kind === "file" ? b.kind === "file" && a.path === b.path : b.kind === "dock");
 
-const moodOf = (input: SpriteInput, now: number): Mood => {
-  if (input.state !== "idle") return input.state;
-  return input.idleSince !== null && now - input.idleSince < AWAKE_MS ? "awake" : "idle";
-};
-
-const movesOnBeat = (walker: Walker) => !walker.leaving && walker.mood !== "idle";
-
 const between = (min: number, max: number) => min + Math.random() * (max - min);
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+// The server stamped `idleSince` on its own clock, so it is read once against ours: a turn that
+// ended in our future just ended, and no stamp keeps a sprite awake past AWAKE_MS from now.
+const awakeUntilOf = (idleSince: number | null, now: number) =>
+  idleSince === null ? 0 : now + AWAKE_MS - clamp(now - idleSince, 0, AWAKE_MS);
+
+const moodOf = (walker: Walker, now: number): Mood =>
+  walker.input.state === "idle" && now < walker.awakeUntil ? "awake" : walker.input.state;
+
+const movesOnBeat = (walker: Walker) => !walker.leaving && walker.mood !== "idle";
 
 const reducedMotion = () =>
   typeof window.matchMedia === "function" &&
@@ -596,15 +601,19 @@ function createSpriteLayer() {
   };
 
   const refreshMood = (walker: Walker, now: number) => {
-    const mood = moodOf(walker.input, now);
+    const mood = moodOf(walker, now);
     if (mood !== walker.mood) setMood(walker, mood);
   };
 
   const speaks = (input: SpriteInput) => !input.quiet && input.state !== "idle";
 
   const apply = (walker: Walker, input: SpriteInput) => {
+    const now = Date.now();
+    if (input.idleSince !== walker.input.idleSince) {
+      walker.awakeUntil = awakeUntilOf(input.idleSince, now);
+    }
     walker.input = input;
-    refreshMood(walker, Date.now());
+    refreshMood(walker, now);
     walker.body.style.background = input.color;
     walker.el.style.setProperty("--code-map-color", input.color);
     walker.el.classList.toggle("opacity-50", input.quiet);
@@ -637,6 +646,7 @@ function createSpriteLayer() {
       pathChangedAt: null,
       pose: null,
       mood: "idle",
+      awakeUntil: awakeUntilOf(input.idleSince, Date.now()),
       phase: spawned++,
       cueBeat: beat,
       strayed: false,
@@ -645,7 +655,7 @@ function createSpriteLayer() {
     walkers.set(input.threadId, walker);
     listen(walker);
     container?.appendChild(el);
-    setMood(walker, moodOf(input, Date.now()));
+    setMood(walker, moodOf(walker, Date.now()));
     return walker;
   };
 
