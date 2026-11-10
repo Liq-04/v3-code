@@ -18,7 +18,6 @@ import {
 
 const refA = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-A"));
 const refB = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-B"));
-const inline = { sheetLayout: false };
 
 beforeEach(() => {
   useClosedViewStore.setState({ entries: [] });
@@ -425,14 +424,14 @@ describe("rightPanelStore", () => {
     const active = (ref: typeof refA) =>
       selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, ref);
 
-    store.revealPinnedMap(refB, inline);
+    store.revealPinnedMap(refB);
     expect(panel(refB).surfaces).toEqual([]);
 
     store.open(refB, "diff");
     store.close(refB);
     store.open(refA, "map");
     expect(useRightPanelStore.getState().mapPinned).toBe(true);
-    store.revealPinnedMap(refB, inline);
+    store.revealPinnedMap(refB);
     expect(active(refB)).toBe("map");
     expect(panel(refB).surfaces.map((surface) => surface.id)).toEqual(["diff", "map"]);
 
@@ -441,7 +440,7 @@ describe("rightPanelStore", () => {
     expect(useRightPanelStore.getState().mapPinned).toBe(true);
     expect(active(refB)).toBe("diff");
     const refC = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-C"));
-    store.revealPinnedMap(refC, inline);
+    store.revealPinnedMap(refC);
     expect(active(refC)).toBe("map");
 
     // A proactive offer does not take the pinned map's place.
@@ -450,18 +449,11 @@ describe("rightPanelStore", () => {
 
     // A thread that got the map first, then tabs of its own, and shows the map again.
     const refD = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-D"));
-    store.revealPinnedMap(refD, inline);
+    store.revealPinnedMap(refD);
     store.open(refD, "diff");
     store.open(refD, "files");
-    store.revealPinnedMap(refD, inline);
+    store.revealPinnedMap(refD);
     expect(active(refD)).toBe("map");
-
-    const refE = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-E"));
-    store.revealPinnedMap(refE, { sheetLayout: true });
-    expect(panel(refE).surfaces).toEqual([]);
-    expect(useRightPanelStore.getState().mapPinned).toBe(true);
-    store.revealPinnedMap(refE, inline);
-    expect(active(refE)).toBe("map");
 
     await reloadRightPanelStore();
     expect(useRightPanelStore.getState().mapPinned).toBe(true);
@@ -476,7 +468,7 @@ describe("rightPanelStore", () => {
     expect(panel(refC).isOpen).toBe(false);
     expect(panel(refD).surfaces.map((surface) => surface.kind)).toEqual(["diff", "files"]);
     expect(active(refD)).toBe("files");
-    store.revealPinnedMap(refA, inline);
+    store.revealPinnedMap(refA);
     expect(active(refA)).toBeNull();
     // The other threads lost a tab the operator never closed there, so none is offered back.
     expect(
@@ -493,7 +485,7 @@ describe("rightPanelStore", () => {
   ])("unpins the map when %s collapses the panel showing it", (_name, collapse) => {
     const store = useRightPanelStore.getState();
     store.open(refA, "map");
-    store.revealPinnedMap(refB, inline);
+    store.revealPinnedMap(refB);
     collapse(refB);
     expect(useRightPanelStore.getState().mapPinned).toBe(false);
     expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBeNull();

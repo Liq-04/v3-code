@@ -111,8 +111,8 @@ interface RightPanelStoreState {
    * or collapsing the panel while it shows, unpins it and takes it out of the other threads.
    */
   mapPinned: boolean;
-  /** Arriving at a thread: its panel opens on the pinned map, unless it would be a sheet over the chat. */
-  revealPinnedMap: (ref: ScopedThreadRef, layout: { readonly sheetLayout: boolean }) => void;
+  /** Arriving at a thread: its panel opens on the pinned map. */
+  revealPinnedMap: (ref: ScopedThreadRef) => void;
   pendingMaximizeThreadKey: string | null;
   requestMaximize: (ref: ScopedThreadRef) => void;
   consumeMaximizeRequest: (ref: ScopedThreadRef) => boolean;
@@ -700,9 +700,9 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
     (set, get) => ({
       byThreadKey: {},
       mapPinned: false,
-      revealPinnedMap: (ref, { sheetLayout }) =>
+      revealPinnedMap: (ref) =>
         set((state) =>
-          state.mapPinned && !sheetLayout
+          state.mapPinned
             ? automaticUpdate(state, scopedThreadKey(ref), (current) =>
                 showsMap(current) ? current : upsertSurface(current, singletonSurface("map")),
               )
