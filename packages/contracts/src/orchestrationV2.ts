@@ -2171,6 +2171,8 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   goal: Schema.optional(Schema.NullOr(OrchestrationV2ProviderGoal)),
   /** The file the latest file-touching tool item named. Absent from older servers. */
   activeFile: Schema.optional(OrchestrationV2ThreadActiveFile),
+  /** Whether a tool item of a live run is in flight. Absent from older servers. */
+  toolRunning: Schema.optional(Schema.Boolean),
   itemCount: NonNegativeInt,
   visibleItemCount: NonNegativeInt,
   createdAt: Schema.DateTimeUtc,

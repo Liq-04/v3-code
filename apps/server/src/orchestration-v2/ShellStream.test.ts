@@ -52,7 +52,23 @@ describe("subagent shell events", () => {
     expect(shouldPublishShellApplicationEvent(stored("child", "node.updated"), subagents)).toBe(
       false,
     );
-    // The map follows a subagent's file and whether its root turn still runs.
+    // The map follows a subagent's tools and whether its root turn still runs.
+    for (const type of ["command_execution", "file_search", "web_search", "subagent"]) {
+      expect(
+        shouldPublishShellApplicationEvent(
+          stored("child", "turn-item.updated", { type }),
+          subagents,
+        ),
+      ).toBe(true);
+    }
+    for (const type of ["reasoning", "assistant_message"]) {
+      expect(
+        shouldPublishShellApplicationEvent(
+          stored("child", "turn-item.updated", { type }),
+          subagents,
+        ),
+      ).toBe(false);
+    }
     expect(
       shouldPublishShellApplicationEvent(
         stored("child", "node.updated", { kind: "root_turn", runId: null }),

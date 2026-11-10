@@ -1,5 +1,5 @@
 import type { ProjectThreadAwarenessV2Input } from "@t3tools/shared/agentAwareness";
-import { pendingGuestMessageCount } from "@t3tools/contracts";
+import { isOrchestrationV2WorkActive, pendingGuestMessageCount } from "@t3tools/contracts";
 import { applyThreadPullRequestLinkUpdate } from "../sourceControl/threadPullRequests.ts";
 import { projectTurnItemForWire } from "./WireProjection.ts";
 import * as Stream from "effect/Stream";
@@ -91,6 +91,8 @@ import { isAbsolutePath, resolveWorkspaceFilePath } from "@t3tools/shared/path";
 import {
   FILE_READ_TOOL_NAME,
   isFileTouchingTurnItem,
+  isToolTurnItem,
+  TOOL_TURN_ITEM_TYPES,
   turnItemReadPaths,
   turnItemTouchedFile,
 } from "@t3tools/shared/toolActivity";
@@ -1055,6 +1057,7 @@ type ShellThreadRow = {
   readonly last_error: string | null;
   readonly session_cwd: string | null;
   readonly active_file_item_payload_json: string | null;
+  readonly tool_running: number;
   readonly terminal_failure_payload_json: string | null;
   readonly blocking_run_id: string | null;
   readonly blocking_run_requested_at: string | null;
@@ -1738,6 +1741,13 @@ export function threadShellFromProjection(
     ),
     pendingBackgroundTasks: [...pendingBackgroundTasks],
     ...(activeFile === undefined ? {} : { activeFile }),
+    // A provider-native subagent's items belong to no run.
+    toolRunning: projection.turnItems.some(
+      (item) =>
+        isToolTurnItem(item) &&
+        isOrchestrationV2WorkActive(item.status) &&
+        (item.runId === null || liveRunIds.has(item.runId)),
+    ),
     providerInstanceHistory: providerInstanceHistoryForShell({
       threadId: projection.thread.id,
       providerThreads: projection.providerThreads,
@@ -1848,6 +1858,7 @@ type ShellThreadState = {
   readonly hasActionableProposedPlan: boolean;
   readonly pendingBackgroundTasks: OrchestrationV2ThreadShell["pendingBackgroundTasks"];
   readonly activeFile: OrchestrationV2ThreadShell["activeFile"];
+  readonly toolRunning: boolean;
   readonly providerInstanceHistory: OrchestrationV2ThreadShell["providerInstanceHistory"];
   readonly goal: OrchestrationV2ThreadShell["goal"];
   readonly itemCount: number;
@@ -2012,6 +2023,7 @@ function shellFromState(input: {
     hasActionableProposedPlan: input.state.hasActionableProposedPlan,
     pendingBackgroundTasks: input.state.pendingBackgroundTasks,
     ...(input.state.activeFile === undefined ? {} : { activeFile: input.state.activeFile }),
+    toolRunning: input.state.toolRunning,
     providerInstanceHistory: input.state.providerInstanceHistory,
     goal: input.state.goal,
     itemCount: input.state.itemCount,
@@ -6378,6 +6390,24 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 ORDER BY touched.ordinal DESC, touched.turn_item_id DESC
                 LIMIT 1
               ) AS active_file_item_payload_json,
+              EXISTS (
+                -- Mirrors toolRunning in threadShellFromProjection.
+                SELECT 1
+                FROM orchestration_v2_projection_turn_items tool
+                  INDEXED BY orchestration_v2_projection_turn_items_active_run_idx
+                WHERE tool.thread_id = t.thread_id
+                  AND tool.status IN ('pending', 'running', 'waiting')
+                  AND tool.type IN ${sql.in(TOOL_TURN_ITEM_TYPES)}
+                  AND (
+                    tool.run_id IS NULL
+                    OR EXISTS (
+                      SELECT 1 FROM orchestration_v2_projection_runs r
+                      WHERE r.run_id = tool.run_id
+                        AND r.status IN ('preparing', 'starting', 'running', 'waiting')
+                        AND NOT ${isSilentShellRun("r")}
+                    )
+                  )
+              ) AS tool_running,
               (
                 SELECT item.payload_json
                 FROM orchestration_v2_projection_turn_items item
@@ -7073,6 +7103,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           hasActionableProposedPlan: row.has_actionable_proposed_plan === 1,
           pendingBackgroundTasks,
           activeFile,
+          toolRunning: row.tool_running === 1,
           providerInstanceHistory: providerInstanceHistoryForShell({
             threadId: thread.id,
             providerThreads: providerThreadsByThreadId.get(thread.id) ?? [],

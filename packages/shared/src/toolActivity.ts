@@ -210,6 +210,21 @@ export function isFileTouchingTurnItem(
   );
 }
 
+/** The turn items that are a tool call. SQL shell reads filter turn items on these types too. */
+export const TOOL_TURN_ITEM_TYPES = [
+  "command_execution",
+  "dynamic_tool",
+  "file_change",
+  "file_search",
+  "web_search",
+  "subagent",
+] as const satisfies ReadonlyArray<OrchestrationV2TurnItem["type"]>;
+
+const toolTurnItemTypes: ReadonlySet<string> = new Set(TOOL_TURN_ITEM_TYPES);
+
+export const isToolTurnItem = (item: Pick<OrchestrationV2TurnItem, "type">) =>
+  toolTurnItemTypes.has(item.type);
+
 /** Every file a read tool or a shell command named, in the order it named them. */
 export function turnItemReadPaths(item: OrchestrationV2TurnItem): ReadonlyArray<string> {
   if (item.type === "command_execution") return item.readPaths ?? [];

@@ -1286,7 +1286,19 @@ it.effect("shells name the file the latest tool touched by its absolute path", (
       }
     });
 
+    const expectToolRunning = Effect.fnUntraced(function* (id: ThreadId, expected: boolean) {
+      const listed = (yield* store.getShellSnapshot()).threads.find((row) => row.id === id);
+      const memory = ProjectionStore.threadShellFromProjection(
+        yield* store.getThreadProjection(id),
+      );
+      assert.deepEqual(
+        [yield* store.getThreadShell(id), listed, memory].map((shell) => shell?.toolRunning),
+        [expected, expected, expected],
+      );
+    });
+
     yield* expectActiveFile(threadId, undefined);
+    yield* expectToolRunning(worktreeThreadId, false);
     yield* read(threadId, 2, { file_path: "/workspace/src/a.ts" });
     yield* expectActiveFile(threadId, { path: "/workspace/src/a.ts", op: "read" });
     const edit = {
@@ -1378,6 +1390,36 @@ it.effect("shells name the file the latest tool touched by its absolute path", (
       }),
       ["/workspace/src/a.ts", "/worktrees/a/src/d.ts"],
     );
+
+    // A tool is running only while a tool item of a live run is in flight.
+    yield* expectToolRunning(worktreeThreadId, true);
+    for (const ordinal of [1, 2]) {
+      yield* updateItem({
+        ...itemOn(worktreeThreadId, ordinal),
+        type: "dynamic_tool",
+        toolName: "Read",
+        input: {},
+        status: "completed",
+        completedAt: at,
+      });
+    }
+    yield* updateItem({
+      ...itemOn(worktreeThreadId, 3),
+      type: "reasoning",
+      text: "",
+      streaming: true,
+    });
+    yield* expectToolRunning(worktreeThreadId, false);
+    yield* updateItem({ ...itemOn(worktreeThreadId, 4), type: "web_search" });
+    yield* expectToolRunning(worktreeThreadId, true);
+    yield* store.apply({
+      id: EventId.make("event:active-file:worktree-run-completed"),
+      type: "run.updated",
+      threadId: worktreeThreadId,
+      occurredAt: at,
+      payload: { ...runs[worktreeThreadId]!, status: "completed", completedAt: at },
+    });
+    yield* expectToolRunning(worktreeThreadId, false);
     yield* assertShellIndexCoversShells();
   }).pipe(Effect.provide(layerTest)),
 );
