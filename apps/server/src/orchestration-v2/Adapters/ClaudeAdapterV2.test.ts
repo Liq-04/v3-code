@@ -11360,7 +11360,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                   type: "tool_use",
                   id: bashToolUseId,
                   name: "Bash",
-                  input: { command: "git status" },
+                  input: { command: "git status; sed -n 1,80p src/a.ts; rg -n foo src" },
                 },
               ],
             },
@@ -11376,14 +11376,18 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             message: {
               role: "user",
               content: [
-                { type: "tool_result", tool_use_id: bashToolUseId, content: "On branch main" },
+                {
+                  type: "tool_result",
+                  tool_use_id: bashToolUseId,
+                  content: "On branch main\nsrc/b.ts:3:foo",
+                },
               ],
             },
             parent_tool_use_id: null,
             uuid: "00000000-0000-4000-8000-000000000791",
             session_id: WAKE_NATIVE_SESSION,
             tool_use_result: {
-              stdout: "On branch main",
+              stdout: "On branch main\nsrc/b.ts:3:foo",
               stderr: "warning: dirty",
               interrupted: false,
               isImage: false,
@@ -11401,12 +11405,12 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             event.type === "turn_item.updated" &&
             event.turnItem.nativeItemRef?.nativeId === bashToolUseId,
         );
-        assert.equal(
+        const bashItem =
           bash?.type === "turn_item.updated" && bash.turnItem.type === "command_execution"
-            ? bash.turnItem.output
-            : undefined,
-          "On branch main\nwarning: dirty",
-        );
+            ? bash.turnItem
+            : undefined;
+        assert.equal(bashItem?.output, "On branch main\nsrc/b.ts:3:foo\nwarning: dirty");
+        assert.deepEqual(bashItem?.readPaths, ["src/a.ts", "src/b.ts"]);
       }).pipe(
         Effect.provide(
           Layer.mergeAll(

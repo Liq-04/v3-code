@@ -242,6 +242,8 @@ import {
   ProjectCreateFromThreadResult,
   ProjectEnsureScratchResult,
   ProjectListEntriesError,
+  ProjectCodeMapChanges,
+  ProjectCodeMapChangesInput,
   ProjectCodeMapError,
   ProjectCodeMapInput,
   ProjectCodeMapSnapshot,
@@ -417,6 +419,7 @@ export const WS_METHODS = {
   projectsListEntries: "projects.listEntries",
   projectsListIgnoredFiles: "projects.listIgnoredFiles",
   projectsGetCodeMap: "projects.getCodeMap",
+  projectsGetCodeMapChanges: "projects.getCodeMapChanges",
   projectsReadFile: "projects.readFile",
   projectsSearchContents: "projects.searchContents",
   projectsSearchEntries: "projects.searchEntries",
@@ -1348,6 +1351,12 @@ const WsProjectsGetCodeMapRpc = Rpc.make(WS_METHODS.projectsGetCodeMap, {
   error: Schema.Union([ProjectCodeMapError, EnvironmentAuthorizationError]),
 });
 
+const WsProjectsGetCodeMapChangesRpc = Rpc.make(WS_METHODS.projectsGetCodeMapChanges, {
+  payload: ProjectCodeMapChangesInput,
+  success: ProjectCodeMapChanges,
+  error: Schema.Union([ProjectCodeMapError, EnvironmentAuthorizationError]),
+});
+
 const WsProjectsListIgnoredFilesRpc = Rpc.make(WS_METHODS.projectsListIgnoredFiles, {
   payload: ProjectListIgnoredFilesInput,
   success: ProjectListIgnoredFilesResult,
@@ -1830,6 +1839,12 @@ const WsOrchestrationV2GetThreadTitlesRpc = Rpc.make(ORCHESTRATION_V2_WS_METHODS
   error: Schema.Union([OrchestrationV2GetShellSnapshotError, EnvironmentAuthorizationError]),
 });
 
+const WsOrchestrationV2GetRunReadPathsRpc = Rpc.make(ORCHESTRATION_V2_WS_METHODS.getRunReadPaths, {
+  payload: OrchestrationV2RpcSchemas.getRunReadPaths.input,
+  success: OrchestrationV2RpcSchemas.getRunReadPaths.output,
+  error: Schema.Union([OrchestrationV2GetShellSnapshotError, EnvironmentAuthorizationError]),
+});
+
 const WsOrchestrationV2GetThreadLinkMetadataRpc = Rpc.make(
   ORCHESTRATION_V2_WS_METHODS.getThreadLinkMetadata,
   {
@@ -2188,6 +2203,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeProjectClonesRpc,
   WsProjectsListEntriesRpc,
   WsProjectsGetCodeMapRpc,
+  WsProjectsGetCodeMapChangesRpc,
   WsProjectsListIgnoredFilesRpc,
   WsProjectsReadFileRpc,
   WsProjectsSearchContentsRpc,
@@ -2278,6 +2294,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2GetArchivedShellSnapshotRpc,
   WsOrchestrationV2GetThreadFamilyRpc,
   WsOrchestrationV2GetThreadTitlesRpc,
+  WsOrchestrationV2GetRunReadPathsRpc,
   WsOrchestrationV2GetThreadLinkMetadataRpc,
   WsOrchestrationV2GetWorktreeThreadIdsRpc,
   WsOrchestrationV2GetOlderSettledThreadsRpc,

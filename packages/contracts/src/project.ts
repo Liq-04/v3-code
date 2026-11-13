@@ -305,6 +305,8 @@ export type ProjectListEntriesResult = typeof ProjectListEntriesResult.Type;
 
 export const ProjectCodeMapInput = Schema.Struct({
   projectId: ProjectId,
+  /** A branch name. Omitted means the repository's default branch. */
+  baseRef: Schema.optional(TrimmedNonEmptyString),
 });
 export type ProjectCodeMapInput = typeof ProjectCodeMapInput.Type;
 
@@ -320,6 +322,10 @@ export type ProjectCodeMapFolder = typeof ProjectCodeMapFolder.Type;
 export const ProjectCodeMapSnapshot = Schema.Struct({
   treeSha: TrimmedNonEmptyString,
   baseRef: TrimmedNonEmptyString,
+  /** Null when the repository has no resolvable default branch and the caller named a base. */
+  defaultBaseRef: Schema.NullOr(TrimmedNonEmptyString),
+  /** Absolute roots of every checkout of the repository, the main one included. */
+  checkouts: Schema.Array(Schema.String),
   files: Schema.Struct({
     paths: Schema.Array(Schema.String),
     lines: Schema.Array(NonNegativeInt),
@@ -330,10 +336,34 @@ export const ProjectCodeMapSnapshot = Schema.Struct({
 });
 export type ProjectCodeMapSnapshot = typeof ProjectCodeMapSnapshot.Type;
 
+export const ProjectCodeMapChangesInput = Schema.Struct({
+  /** An absolute folder inside a checkout: its root or any subfolder. */
+  root: TrimmedNonEmptyString,
+  baseRef: Schema.optional(TrimmedNonEmptyString),
+});
+export type ProjectCodeMapChangesInput = typeof ProjectCodeMapChangesInput.Type;
+
+// Committed, uncommitted and untracked work in `root`'s checkout since it left the base branch.
+// Largest changes first, capped; `filesTotal` counts the uncapped list.
+export const ProjectCodeMapChanges = Schema.Struct({
+  /** The absolute root of the checkout that was diffed, as git prints it. Paths are relative to it. */
+  checkout: Schema.String,
+  files: Schema.Array(
+    Schema.Struct({
+      path: Schema.String,
+      insertions: NonNegativeInt,
+      deletions: NonNegativeInt,
+    }),
+  ),
+  filesTotal: NonNegativeInt,
+});
+export type ProjectCodeMapChanges = typeof ProjectCodeMapChanges.Type;
+
 export const ProjectCodeMapFailure = Schema.Literals([
   "project_not_found",
   "not_a_git_repository",
   "default_branch_not_found",
+  "base_not_found",
   "git_failed",
 ]);
 export type ProjectCodeMapFailure = typeof ProjectCodeMapFailure.Type;
@@ -354,8 +384,10 @@ export class ProjectCodeMapError extends Schema.TaggedError<ProjectCodeMapError>
         return "The project is not a Git repository.";
       case "default_branch_not_found":
         return "The project's default branch could not be resolved.";
+      case "base_not_found":
+        return "The base branch was not found.";
       case "git_failed":
-        return "Git failed while reading the default branch.";
+        return "Git failed while reading the repository.";
     }
   }
 }

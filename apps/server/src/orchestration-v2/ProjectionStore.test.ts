@@ -1168,7 +1168,7 @@ it.effect("SQL shells use the latest subagent owner for duplicate provider-threa
   }).pipe(Effect.provide(layerTest)),
 );
 
-it.effect("shells name the file the latest tool touched, relative to the thread root", () =>
+it.effect("shells name the file the latest tool touched by its absolute path", () =>
   Effect.gen(function* () {
     const store = yield* ProjectionStore.ProjectionStoreV2;
     const threadId = yield* addRolledBackRecoveryCandidate("active-file");
@@ -1286,38 +1286,50 @@ it.effect("shells name the file the latest tool touched, relative to the thread 
       }
     });
 
+    const expectToolRunning = Effect.fnUntraced(function* (id: ThreadId, expected: boolean) {
+      const listed = (yield* store.getShellSnapshot()).threads.find((row) => row.id === id);
+      const memory = ProjectionStore.threadShellFromProjection(
+        yield* store.getThreadProjection(id),
+      );
+      assert.deepEqual(
+        [yield* store.getThreadShell(id), listed, memory].map((shell) => shell?.toolRunning),
+        [expected, expected, expected],
+      );
+    });
+
     yield* expectActiveFile(threadId, undefined);
+    yield* expectToolRunning(worktreeThreadId, false);
     yield* read(threadId, 2, { file_path: "/workspace/src/a.ts" });
-    yield* expectActiveFile(threadId, { path: "src/a.ts", op: "read" });
+    yield* expectActiveFile(threadId, { path: "/workspace/src/a.ts", op: "read" });
     const edit = {
       ...itemOn(threadId, 3),
       type: "file_change" as const,
       fileName: "/workspace/src/b.ts",
     };
     yield* updateItem(edit);
-    yield* expectActiveFile(threadId, { path: "src/b.ts", op: "edit" });
+    yield* expectActiveFile(threadId, { path: "/workspace/src/b.ts", op: "edit" });
     yield* updateItem({ ...edit, status: "completed", completedAt: at });
-    yield* expectActiveFile(threadId, { path: "src/b.ts", op: "edit" });
-    yield* read(threadId, 4, { file_path: "/etc/hosts" });
-    yield* expectActiveFile(threadId, undefined);
-    yield* read(threadId, 5, { path: "/workspace/src/c.ts", offset: 10 });
-    yield* expectActiveFile(threadId, { path: "src/c.ts", op: "read" });
+    yield* expectActiveFile(threadId, { path: "/workspace/src/b.ts", op: "edit" });
+    yield* read(threadId, 4, { file_path: "/other-checkout/src/a.ts" });
+    yield* expectActiveFile(threadId, { path: "/other-checkout/src/a.ts", op: "read" });
+    yield* read(threadId, 5, { path: "src/c.ts", offset: 10 });
+    yield* expectActiveFile(threadId, { path: "/workspace/src/c.ts", op: "read" });
     yield* updateItem({
       ...itemOn(threadId, 6),
       type: "dynamic_tool",
       toolName: "Bash",
       input: { command: "ls", path: "/workspace/src" },
     });
-    yield* expectActiveFile(threadId, { path: "src/c.ts", op: "read" });
+    yield* expectActiveFile(threadId, { path: "/workspace/src/c.ts", op: "read" });
     yield* updateItem({
       ...itemOn(threadId, 6),
       id: TurnItemId.make("item:active-file:command-read"),
       ordinal: 7,
       type: "command_execution",
-      input: "cat src/e.ts",
-      readPaths: ["/workspace/src/e.ts"],
+      input: "cat src/e.ts src/f.ts",
+      readPaths: ["/workspace/src/e.ts", "/workspace/src/f.ts"],
     });
-    yield* expectActiveFile(threadId, { path: "src/e.ts", op: "read" });
+    yield* expectActiveFile(threadId, { path: "/workspace/src/e.ts", op: "read" });
     yield* updateItem({
       ...itemOn(threadId, 6),
       id: TurnItemId.make("item:active-file:command-plain"),
@@ -1325,7 +1337,7 @@ it.effect("shells name the file the latest tool touched, relative to the thread 
       type: "command_execution",
       input: "ls src",
     });
-    yield* expectActiveFile(threadId, { path: "src/e.ts", op: "read" });
+    yield* expectActiveFile(threadId, { path: "/workspace/src/e.ts", op: "read" });
     yield* updateItem({
       ...itemOn(threadId, 9),
       runId: rolledBackRun.id,
@@ -1333,12 +1345,100 @@ it.effect("shells name the file the latest tool touched, relative to the thread 
       type: "file_change",
       fileName: "/workspace/src/rolled-back.ts",
     });
-    yield* expectActiveFile(threadId, { path: "src/e.ts", op: "read" });
+    yield* expectActiveFile(threadId, { path: "/workspace/src/e.ts", op: "read" });
+    yield* read(threadId, 10, { file_path: "/workspace/src/a.ts" });
+    yield* updateItem({
+      ...itemOn(threadId, 11),
+      runId: rolledBackRun.id,
+      nodeId: rolledBackRun.rootNodeId,
+      type: "dynamic_tool",
+      toolName: "Read",
+      input: { file_path: "/workspace/src/earlier-run.ts" },
+    });
+    yield* updateItem({
+      ...itemOn(threadId, 13),
+      type: "dynamic_tool",
+      toolName: "Grep",
+      input: { pattern: "foo", path: "/workspace/src" },
+      readPaths: ["src/g.ts", "/workspace/src/e.ts"],
+    });
+    yield* expectActiveFile(threadId, { path: "/workspace/src/g.ts", op: "read" });
+    yield* updateItem({
+      ...itemOn(threadId, 14),
+      type: "command_execution",
+      input: "sed -n 1,80p src/h.ts",
+      readPaths: ["src/h.ts"],
+    });
+    yield* expectActiveFile(threadId, { path: "/workspace/src/h.ts", op: "read" });
 
-    yield* read(worktreeThreadId, 1, { file_path: "/worktrees/a/src/d.ts" });
-    yield* expectActiveFile(worktreeThreadId, { path: "src/d.ts", op: "read" });
+    // Reads only, each path once, newest first; edits and other runs stay out.
+    assert.deepEqual(yield* store.getRunReadPaths({ threadId, runId: runs[threadId]!.id }), [
+      "/workspace/src/h.ts",
+      "/workspace/src/g.ts",
+      "/workspace/src/e.ts",
+      "/workspace/src/a.ts",
+      "/workspace/src/f.ts",
+      "/workspace/src/c.ts",
+      "/other-checkout/src/a.ts",
+    ]);
+    assert.deepEqual(yield* store.getRunReadPaths({ threadId, runId: rolledBackRun.id }), [
+      "/workspace/src/earlier-run.ts",
+    ]);
+    // A provider-native subagent's items belong to no T3 run.
+    yield* updateItem({
+      ...itemOn(threadId, 12),
+      runId: null,
+      type: "dynamic_tool",
+      toolName: "Read",
+      input: { file_path: "/workspace/src/native.ts" },
+    });
+    assert.deepEqual(yield* store.getRunReadPaths({ threadId, runId: null }), [
+      "/workspace/src/native.ts",
+    ]);
+
+    yield* read(worktreeThreadId, 1, { file_path: "src/d.ts" });
+    yield* expectActiveFile(worktreeThreadId, { path: "/worktrees/a/src/d.ts", op: "read" });
     yield* read(worktreeThreadId, 2, { file_path: "/workspace/src/a.ts" });
-    yield* expectActiveFile(worktreeThreadId, undefined);
+    yield* expectActiveFile(worktreeThreadId, { path: "/workspace/src/a.ts", op: "read" });
+    assert.deepEqual(
+      yield* store.getRunReadPaths({
+        threadId: worktreeThreadId,
+        runId: runs[worktreeThreadId]!.id,
+      }),
+      ["/workspace/src/a.ts", "/worktrees/a/src/d.ts"],
+    );
+
+    // A tool is running only while a tool item of a live run is in flight.
+    yield* expectToolRunning(worktreeThreadId, true);
+    for (const ordinal of [1, 2]) {
+      yield* updateItem({
+        ...itemOn(worktreeThreadId, ordinal),
+        type: "dynamic_tool",
+        toolName: "Read",
+        input: {},
+        status: "completed",
+        completedAt: at,
+      });
+    }
+    yield* updateItem({
+      ...itemOn(worktreeThreadId, 3),
+      type: "reasoning",
+      text: "",
+      streaming: true,
+    });
+    yield* expectToolRunning(worktreeThreadId, false);
+    yield* updateItem({ ...itemOn(worktreeThreadId, 5), runId: null, type: "web_search" });
+    yield* expectToolRunning(worktreeThreadId, false);
+    yield* updateItem({ ...itemOn(worktreeThreadId, 4), type: "web_search" });
+    yield* expectToolRunning(worktreeThreadId, true);
+    yield* store.apply({
+      id: EventId.make("event:active-file:worktree-run-completed"),
+      type: "run.updated",
+      threadId: worktreeThreadId,
+      occurredAt: at,
+      payload: { ...runs[worktreeThreadId]!, status: "completed", completedAt: at },
+    });
+    yield* expectToolRunning(worktreeThreadId, false);
     yield* assertShellIndexCoversShells();
   }).pipe(Effect.provide(layerTest)),
 );
@@ -8702,3 +8802,98 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
     }),
   );
 });
+
+it.effect("a provider-native subagent's shell is live while its root turn runs", () =>
+  Effect.gen(function* () {
+    const store = yield* ProjectionStore.ProjectionStoreV2;
+    const now = yield* DateTime.now;
+    const parentId = ThreadId.make("thread:native-parent");
+    const childId = ThreadId.make("thread:native-child");
+    for (const [id, parent] of [
+      [parentId, null],
+      [childId, parentId],
+    ] as const) {
+      yield* store.apply({
+        id: EventId.make(`event:${id}:created`),
+        type: "thread.created",
+        threadId: id,
+        occurredAt: now,
+        payload: {
+          createdBy: parent ? "agent" : "user",
+          creationSource: parent ? "provider" : "web",
+          id,
+          projectId: ProjectId.make("project:native"),
+          title: id,
+          providerInstanceId,
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          activeProviderThreadId: null,
+          lineage: {
+            parentThreadId: parent,
+            relationshipToParent: parent ? "subagent" : null,
+            rootThreadId: parentId,
+          },
+          forkedFrom: null,
+          createdAt: now,
+          updatedAt: now,
+          archivedAt: null,
+          settledOverride: null,
+          settledAt: null,
+          lastVisitedAt: null,
+          deletedAt: null,
+        },
+      });
+    }
+    const setRoot = (
+      name: string,
+      status: "running" | "completed",
+      startedAt: DateTime.Utc = now,
+    ) => {
+      const rootNodeId = NodeId.make(`node:native-child:${name}`);
+      return store.apply({
+        id: EventId.make(`event:native-child:${name}:${status}`),
+        type: "node.updated",
+        threadId: childId,
+        nodeId: rootNodeId,
+        driver,
+        occurredAt: now,
+        payload: {
+          id: rootNodeId,
+          threadId: childId,
+          runId: null,
+          rootNodeId,
+          parentNodeId: null,
+          kind: "root_turn",
+          status,
+          countsForRun: false,
+          providerThreadId: null,
+          providerTurnId: null,
+          nativeItemRef: null,
+          runtimeRequestId: null,
+          checkpointScopeId: null,
+          startedAt,
+          completedAt: status === "running" ? null : now,
+        },
+      });
+    };
+    const expectActivity = Effect.fnUntraced(function* (expected: "running" | null) {
+      const listed = (yield* store.getShellSnapshot()).threads.find((row) => row.id === childId);
+      const memory = ProjectionStore.threadShellFromProjection(
+        yield* store.getThreadProjection(childId),
+      );
+      for (const shell of [yield* store.getThreadShell(childId), listed, memory]) {
+        assert.equal(shell?.activityRunStatus ?? null, expected);
+      }
+    });
+
+    yield* setRoot("root", "running");
+    yield* expectActivity("running");
+    yield* setRoot("root", "completed");
+    yield* expectActivity(null);
+    yield* setRoot("stuck", "running", DateTime.subtract(now, { minutes: 1 }));
+    yield* expectActivity(null);
+  }).pipe(Effect.provide(layerTest)),
+);

@@ -7,7 +7,9 @@ import {
 } from "@t3tools/client-runtime/state/code-map";
 import {
   EnvironmentId,
+  ProjectId,
   ProviderInstanceId,
+  RunId,
   ThreadId,
   type ProjectCodeMapSnapshot,
 } from "@t3tools/contracts";
@@ -23,16 +25,17 @@ import type { CodeMapView } from "~/state/codeMap";
 
 const state = vi.hoisted(() => ({ view: null as unknown as Atom.Writable<CodeMapView> }));
 
-vi.mock("~/state/codeMap", () => ({
-  codeMapViewAtom: () => state.view,
-  codeMapSnapshotAtom: () => state.view,
-}));
+vi.mock("~/state/codeMap", async () => {
+  const { Atom } = await import("effect/reactivity");
+  return {
+    codeMapViewAtom: () => state.view,
+    codeMapSnapshotAtom: () => state.view,
+    codeMapBasesAtom: Atom.make({}),
+  };
+});
 vi.mock("~/state/entities", () => ({
   useThreadShell: () => ({ projectId: "project" }),
-  useThreadShellsForProjectRefs: () => [
-    { id: "a", title: "Code map" },
-    { id: "b", title: "Checkpoint diff stalls" },
-  ],
+  useProject: () => null,
 }));
 
 import { CodeMapPanel } from "./CodeMapPanel";
@@ -41,6 +44,7 @@ import { buildWorld, rectOf } from "./mapWorld";
 import { selectActiveRightPanelSurface, useRightPanelStore } from "~/rightPanelStore";
 
 const PROJECT = "/work/app";
+const PROJECT_ID = ProjectId.make("project");
 const CHAT_VIEW = "apps/web/ChatView.tsx";
 const INDEX_CSS = "apps/web/index.css";
 const ORCH = "packages/contracts/orchestrationV2.ts";
@@ -50,6 +54,8 @@ const ref = scopeThreadRef(EnvironmentId.make("environment"), ThreadId.make("a")
 const snapshot: ProjectCodeMapSnapshot = {
   treeSha: "8e1581ad8f00",
   baseRef: "main",
+  defaultBaseRef: "main",
+  checkouts: [PROJECT],
   files: {
     paths: [CHAT_VIEW, INDEX_CSS, ORCH, GIT],
     lines: [1600, 1300, 4200, 700],
@@ -68,9 +74,11 @@ function thread(
   id: string,
   opts: { running?: boolean; finished?: boolean; active?: string | null; subagentOf?: string },
 ): CodeMapThreadInput {
+  const root = `/wt/${opts.subagentOf ?? id}`;
   return {
     id: ThreadId.make(id),
-    worktreePath: `/wt/${opts.subagentOf ?? id}`,
+    projectId: PROJECT_ID,
+    worktreePath: root,
     archivedAt: null,
     deletedAt: null,
     lineage: {
@@ -82,6 +90,9 @@ function thread(
     hasPendingApprovals: false,
     hasPendingUserInput: false,
     interactionMode: "default",
+    settledOverride: null,
+    snoozedUntil: null,
+    snoozedAt: null,
     latestRun: null,
     runtime: {
       status: opts.running ? "running" : opts.finished ? "completed" : "idle",
@@ -92,8 +103,15 @@ function thread(
       updatedAt: "2026-06-01T00:00:00.000Z",
     },
     source: {
+      activeRunId: opts.running ? RunId.make(`run:${id}`) : null,
+      status: opts.running ? "running" : "idle",
+      pendingRuntimeRequest: null,
       activeFile: opts.active
-        ? { path: opts.active, op: "edit", at: DateTime.makeUnsafe("2026-06-01T00:00:00.000Z") }
+        ? {
+            path: `${root}/${opts.active}`,
+            op: "edit",
+            at: DateTime.makeUnsafe("2026-06-01T00:00:00.000Z"),
+          }
         : undefined,
     },
   };
@@ -104,18 +122,34 @@ const change = (path: string): CodeMapChange => ({ path, insertions: 4, deletion
 function view(
   threads: CodeMapThreadInput[],
   changes: Record<string, CodeMapChange[]>,
+  reads: Record<string, string[]> = {},
 ): CodeMapView {
   const model = deriveCodeMap({
     snapshot,
     threads,
-    changesByRoot: new Map(Object.entries(changes)),
-    projectRoot: PROJECT,
+    changesByRoot: new Map(
+      Object.entries(changes).map(([root, files]) => [root, { checkout: root, files }]),
+    ),
+    projectRoots: new Map([[PROJECT_ID, PROJECT]]),
+    now: "2026-06-01T12:00:00.000Z",
+    backfilledReads: new Map(
+      Object.entries(reads).map(([id, paths]) => [ThreadId.make(id), paths]),
+    ),
+    observedReads: new Map(),
   });
   return {
     status: "ready",
     treeSha: snapshot.treeSha,
+    baseKey: "repo",
     baseRef: snapshot.baseRef,
+    defaultBaseRef: snapshot.defaultBaseRef,
+    chosenBaseRef: null,
     files: snapshot.files,
+    threadTitles: new Map([
+      [ThreadId.make("a"), "Code map"],
+      [ThreadId.make("b"), "Checkpoint diff stalls"],
+    ]),
+    threadProjectNames: new Map([[ThreadId.make("b"), "T3 Code"]]),
     model,
   };
 }
@@ -137,6 +171,7 @@ const twoThreads = () =>
 function setup(initial: CodeMapView) {
   useRightPanelStore.setState({ byThreadKey: {} });
   useCodeMapFocusStore.setState({ selected: null, hoveredPath: null });
+  localStorage.removeItem("t3code:code-map-scope:v1");
   state.view = Atom.make(initial);
   const registry = AtomRegistry.make();
   const container = document.createElement("div");
@@ -195,7 +230,7 @@ it("opens the other thread for a file only it changed", async () => {
   expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, ref)).toBeNull();
 });
 
-it("fades the other thread until the scope switches to All", async () => {
+it("fades the other thread until the scope switches to All, and a reopened map keeps All", async () => {
   using context = setup(twoThreads());
   await using screen = await render(context.ui, { container: context.container });
   expect(cell(screen, GIT).dataset.strength).toBe("faint");
@@ -211,6 +246,16 @@ it("fades the other thread until the scope switches to All", async () => {
   await userEvent.click(screen.getByRole("button", { name: "All" }));
   await expect.poll(() => cell(screen, GIT).dataset.strength).toBe("strong");
   expect(sprite(screen, "b")!.className).not.toContain("opacity-50");
+
+  const container = document.createElement("div");
+  container.style.cssText = context.container.style.cssText;
+  await using reopened = await render(
+    <RegistryContext.Provider value={context.registry}>
+      <CodeMapPanel threadRef={ref} />
+    </RegistryContext.Provider>,
+    { container },
+  );
+  await expect.poll(() => cell(reopened, GIT).dataset.strength).toBe("strong");
 });
 
 it("paints marked files over the background", async () => {
@@ -220,9 +265,23 @@ it("paints marked files over the background", async () => {
   const { x, y } = centreOf(screen, ORCH);
   const background = getComputedStyle(canvas.parentElement!).backgroundColor;
   await vi.waitFor(() => expect(`rgb(${pixel(canvas, x, y)})`).not.toBe(background));
+
+  // A file a running thread only read gets a wash an untouched file does not.
+  const threads = [thread("a", { running: true }), thread("b", { running: true })];
+  const onlyOrch = { "/wt/a": [change(ORCH)], "/wt/b": [change(ORCH)] };
+  const fill = (path: string) => {
+    const centre = centreOf(screen, path);
+    return pixel(canvas, centre.x, centre.y);
+  };
+  await act(() => context.registry.set(state.view, view(threads, onlyOrch)));
+  await vi.waitFor(() => expect(fill(INDEX_CSS)).toBe(fill(GIT)));
+  await act(() =>
+    context.registry.set(state.view, view(threads, onlyOrch, { a: [`/wt/a/${INDEX_CSS}`] })),
+  );
+  await vi.waitFor(() => expect(fill(INDEX_CSS)).not.toBe(fill(GIT)));
 });
 
-it("draws a sprite for each running thread and none for a finished one", async () => {
+it("draws a working sprite for a running thread and an idle one for a finished one", async () => {
   using context = setup(
     view([thread("a", { running: true, active: CHAT_VIEW }), thread("b", { finished: true })], {
       "/wt/a": [change(CHAT_VIEW)],
@@ -230,9 +289,39 @@ it("draws a sprite for each running thread and none for a finished one", async (
     }),
   );
   await using screen = await render(context.ui, { container: context.container });
-  expect(screen.container.querySelectorAll('[data-testid="code-map-sprite"]')).toHaveLength(1);
+  expect(screen.container.querySelectorAll('[data-testid="code-map-sprite"]')).toHaveLength(2);
   expect(sprite(screen, "a")!.dataset.path).toBe(CHAT_VIEW);
+  expect(sprite(screen, "b")!.dataset.state).toBe("idle");
+  expect(sprite(screen, "b")!.dataset.path).toBe(GIT);
   expect(cell(screen, GIT).dataset.strength).toBe("faint");
+});
+
+it("shows a stopped thread's card on hover and opens the thread on click", async () => {
+  using context = setup(
+    view(
+      [
+        thread("a", { running: true, active: CHAT_VIEW }),
+        thread("b", { finished: true, active: GIT }),
+      ],
+      twoChanges,
+    ),
+  );
+  await using screen = await render(context.ui, { container: context.container });
+  using navigate = vi.spyOn(screen.router!, "navigate").mockResolvedValue(undefined);
+  const stopped = sprite(screen, "b")!;
+  expect(stopped.dataset.state).toBe("idle");
+  expect(stopped.querySelector('[data-testid="code-map-say"]')).toBeNull();
+
+  await userEvent.hover(stopped);
+  const card = screen.getByRole("tooltip");
+  await expect.element(card).toMatchTextContent(/Checkpoint diff stalls.*Idle · last at git\.ts/);
+  await userEvent.unhover(stopped);
+  await expect.element(card).not.toBeInTheDocument();
+
+  await userEvent.click(stopped);
+  expect(navigate).toHaveBeenCalledWith(
+    expect.objectContaining({ params: expect.objectContaining({ threadId: "b" }) }),
+  );
 });
 
 it("walks the sprite to its new file, stops requesting frames, and stays when the path goes quiet", async () => {
@@ -250,11 +339,10 @@ it("walks the sprite to its new file, stops requesting frames, and stays when th
       ),
     ),
   );
-  const body = sprite(screen, "a")!.firstElementChild!;
   expect(sprite(screen, "a")!.dataset.path).toBe(ORCH);
-  expect(body.className).toContain("code-map-walk");
+  expect(sprite(screen, "a")!.dataset.look).toBeDefined();
   vi.advanceTimersByTime(2000);
-  expect(body.className).not.toContain("code-map-walk");
+  expect(sprite(screen, "a")!.dataset.look).toBeUndefined();
   expect(vi.getTimerCount()).toBe(0);
   const target = centreOf(screen, ORCH).rect;
   const landed = sprite(screen, "a")!.style.transform;
@@ -273,7 +361,7 @@ it("walks the sprite to its new file, stops requesting frames, and stays when th
     ),
   );
   expect(sprite(screen, "a")!.dataset.path).toBe(ORCH);
-  expect(body.className).not.toContain("code-map-walk");
+  expect(sprite(screen, "a")!.dataset.look).toBeUndefined();
   vi.advanceTimersByTime(500);
   expect(sprite(screen, "a")!.style.transform).toBe(landed);
   expect(vi.getTimerCount()).toBe(0);
@@ -302,7 +390,6 @@ it("shows a running subagent as a small sprite in its parent's colour and walks 
   const sub = sprite(screen, "s")!;
   expect(sub.dataset.kind).toBe("subagent");
   expect((sub.firstElementChild as HTMLElement).style.background).toBe(parentColor);
-  expect(sub.style.transform).toBe(parent.style.transform);
   expect(sub.className).not.toContain("opacity-50");
   vi.advanceTimersByTime(2000);
   expect(sub.style.transform).not.toBe(parent.style.transform);

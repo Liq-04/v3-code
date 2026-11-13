@@ -493,6 +493,10 @@ export interface OrchestratorV2Shape {
   readonly getThreadTitles: (
     threadIds: ReadonlyArray<ThreadId>,
   ) => Effect.Effect<Record<ThreadId, string>, OrchestratorV2Error>;
+  readonly getRunReadPaths: (input: {
+    readonly threadId: ThreadId;
+    readonly runId: RunId | null;
+  }) => Effect.Effect<ReadonlyArray<string>, OrchestratorV2Error>;
   readonly getThreadEventSequence: (
     threadId: ThreadId,
   ) => Effect.Effect<number, OrchestratorV2Error>;
@@ -14730,6 +14734,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     }),
     getThreadTitles: Effect.fn("OrchestratorV2.getThreadTitles")(function (threadIds) {
       return projectionStore.getThreadTitles(threadIds).pipe(Effect.mapError(shellProjectionError));
+    }),
+    getRunReadPaths: Effect.fn("OrchestratorV2.getRunReadPaths")(function (input) {
+      return projectionStore.getRunReadPaths(input).pipe(Effect.mapError(shellProjectionError));
     }),
     getThreadEventSequence: Effect.fn("OrchestratorV2.getThreadEventSequence")(function (threadId) {
       return eventSink

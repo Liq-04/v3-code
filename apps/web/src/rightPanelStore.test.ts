@@ -23,6 +23,7 @@ beforeEach(() => {
   useClosedViewStore.setState({ entries: [] });
   useRightPanelStore.setState({
     byThreadKey: {},
+    mapPinned: false,
     threadPanelVisibilityByThreadKey: {},
     userActionRevisionByThreadKey: {},
     closeRevisionByThreadKey: {},
@@ -414,6 +415,86 @@ describe("rightPanelStore", () => {
     expect(
       selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).isOpen,
     ).toBe(false);
+  });
+
+  it("pins the map so it opens in every thread the operator visits", async () => {
+    const store = useRightPanelStore.getState();
+    const panel = (ref: typeof refA) =>
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, ref);
+    const active = (ref: typeof refA) =>
+      selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, ref);
+
+    store.revealPinnedMap(refB);
+    expect(panel(refB).surfaces).toEqual([]);
+
+    store.open(refB, "diff");
+    store.close(refB);
+    store.open(refA, "map");
+    expect(useRightPanelStore.getState().mapPinned).toBe(true);
+    store.revealPinnedMap(refB);
+    expect(active(refB)).toBe("map");
+    expect(panel(refB).surfaces.map((surface) => surface.id)).toEqual(["diff", "map"]);
+
+    // Another tab in one thread is that thread's business; the next thread still gets the map.
+    store.activateSurface(refB, "diff");
+    expect(useRightPanelStore.getState().mapPinned).toBe(true);
+    expect(active(refB)).toBe("diff");
+    const refC = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-C"));
+    store.revealPinnedMap(refC);
+    expect(active(refC)).toBe("map");
+
+    // A proactive offer does not take the pinned map's place.
+    expect(store.openProactive(refC, completedDiff, store.getUserActionRevision(refC))).toBe(false);
+    expect(active(refC)).toBe("map");
+
+    // A thread that got the map first, then tabs of its own, and shows the map again.
+    const refD = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-D"));
+    store.revealPinnedMap(refD);
+    store.open(refD, "diff");
+    store.open(refD, "files");
+    store.revealPinnedMap(refD);
+    expect(active(refD)).toBe("map");
+
+    await reloadRightPanelStore();
+    expect(useRightPanelStore.getState().mapPinned).toBe(true);
+
+    // Closing the tab anywhere unpins and takes the map out of the other threads.
+    store.closeSurface(refB, "map");
+    expect(useRightPanelStore.getState().mapPinned).toBe(false);
+    expect(active(refB)).toBe("diff");
+    expect(panel(refA)).toEqual({ isOpen: false, activeSurfaceId: null, surfaces: [] });
+    // A panel that showed the map collapses only when the map was its last tab.
+    expect(panel(refC).surfaces.map((surface) => surface.kind)).not.toContain("map");
+    expect(panel(refC).isOpen).toBe(false);
+    expect(panel(refD).surfaces.map((surface) => surface.kind)).toEqual(["diff", "files"]);
+    expect(active(refD)).toBe("files");
+    store.revealPinnedMap(refA);
+    expect(active(refA)).toBeNull();
+    // The other threads lost a tab the operator never closed there, so none is offered back.
+    expect(
+      useClosedViewStore
+        .getState()
+        .entries.map((entry) => entry.kind === "panel-tab" && entry.threadRef),
+    ).toEqual([refB]);
+  });
+
+  it.each([
+    ["close", (ref: typeof refA) => useRightPanelStore.getState().close(ref)],
+    ["toggleVisibility", (ref: typeof refA) => useRightPanelStore.getState().toggleVisibility(ref)],
+    ["toggle map", (ref: typeof refA) => useRightPanelStore.getState().toggle(ref, "map")],
+  ])("unpins the map when %s collapses the panel showing it", (_name, collapse) => {
+    const store = useRightPanelStore.getState();
+    store.open(refA, "map");
+    store.revealPinnedMap(refB);
+    collapse(refB);
+    expect(useRightPanelStore.getState().mapPinned).toBe(false);
+    expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBeNull();
+
+    // Collapsing on another tab hides the panel here without giving up the map.
+    store.open(refA, "map");
+    store.open(refA, "diff");
+    store.close(refA);
+    expect(useRightPanelStore.getState().mapPinned).toBe(true);
   });
 
   it("offers each completed diff once across dismissal, panel changes, and reload", async () => {

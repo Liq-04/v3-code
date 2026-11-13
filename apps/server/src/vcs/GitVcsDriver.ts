@@ -343,6 +343,24 @@ export class GitVcsDriver extends Context.Service<
       cwd: string,
       baseRef: string,
     ) => Effect.Effect<GitRangeContext, GitCommandError>;
+    /**
+     * Committed, uncommitted and untracked changes in `cwd` since it left `baseRef`, largest
+     * first and capped; `filesTotal` counts the uncapped list.
+     */
+    readonly readBranchChanges: (
+      cwd: string,
+      baseRef: string,
+    ) => Effect.Effect<
+      {
+        readonly files: ReadonlyArray<{
+          readonly path: string;
+          readonly insertions: number;
+          readonly deletions: number;
+        }>;
+        readonly filesTotal: number;
+      },
+      GitCommandError
+    >;
     readonly getReviewBranchCommits: (
       input: ReviewBranchCommitsInput,
     ) => Effect.Effect<ReviewBranchCommitsResult, GitCommandError>;

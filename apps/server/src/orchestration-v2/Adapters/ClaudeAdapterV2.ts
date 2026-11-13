@@ -11,6 +11,7 @@ import {
   formatReadToolLabel,
   formatSearchToolLabel,
 } from "@t3tools/shared/toolActivity";
+import { searchOutputPaths, shellCommandReadPaths } from "@t3tools/shared/shellReads";
 import { field, text } from "../unknownField.ts";
 import { mergeWorkflowAgentMetadata, type WorkflowAgentMetadata } from "../workflowAgentAnswers.ts";
 import {
@@ -3405,6 +3406,19 @@ function claudeCommandOutputText(output: ClaudeNativeToolOutput): string {
   return claudeNativeToolOutputText(output);
 }
 
+function claudeGrepReadPaths(
+  input: ClaudeNativeToolInput,
+  output: ClaudeNativeToolOutput,
+): string[] {
+  const text = claudeSubagentResultText(
+    output.type === "structured_tool_use_result" && output.fallbackValue !== undefined
+      ? { type: "content_block", value: output.fallbackValue }
+      : output,
+  );
+  const mode = firstStringInputField(input, ["output_mode"]);
+  return searchOutputPaths(text, mode === undefined || mode === "files_with_matches");
+}
+
 function claudeSubagentResultText(output: ClaudeNativeToolOutput): string {
   const value = claudeNativeToolOutputValue(output);
   const content = Array.isArray(value)
@@ -6140,13 +6154,21 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               : itemType === "file_change"
                 ? claudeFileChangeText(input.output)
                 : claudeNativeToolOutputText(input.output);
+          const commandInput = commandInputFromClaudeTool(input.toolName, input.toolInput);
+          const readPaths =
+            itemType === "command_execution"
+              ? shellCommandReadPaths(commandInput, outputText)
+              : input.classification.normalizedName === "grep"
+                ? claudeGrepReadPaths(input.toolInput, input.output)
+                : [];
           const turnItem: OrchestrationV2TurnItem =
             itemType === "command_execution"
               ? {
                   ...itemBase,
                   type: "command_execution",
-                  input: commandInputFromClaudeTool(input.toolName, input.toolInput),
+                  input: commandInput,
                   ...(outputText.length === 0 ? {} : { output: outputText }),
+                  ...(readPaths.length === 0 ? {} : { readPaths }),
                 }
               : itemType === "file_change"
                 ? {
@@ -6189,6 +6211,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                       ...(viewedImagePath === undefined ? {} : { viewedImagePath }),
                       input: claudeNativeToolInputValue(input.toolInput),
                       ...(outputValue === undefined ? {} : { output: outputValue }),
+                      ...(readPaths.length === 0 ? {} : { readPaths }),
                     };
           return { node, turnItem };
         };

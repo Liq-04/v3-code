@@ -7,6 +7,7 @@ import {
   dynamicToolSurface,
   isFileTouchingTurnItem,
   mergeToolActivityData,
+  turnItemReadPaths,
   turnItemTouchedFile,
 } from "./toolActivity.ts";
 
@@ -48,6 +49,11 @@ describe("toolActivity", () => {
       [read({ filePath: "/repo/src/d.ts" }), { path: "/repo/src/d.ts", op: "read" }, true],
       [read({}), undefined, true],
       [
+        read({ path: "/repo/src/g.ts", locations: [{ path: "/repo/src/h.ts" }] }),
+        { path: "/repo/src/g.ts", op: "read" },
+        true,
+      ],
+      [
         {
           ...base,
           type: "dynamic_tool",
@@ -69,11 +75,32 @@ describe("toolActivity", () => {
         true,
       ],
       [{ ...base, type: "command_execution", input: "ls", readPaths: [] }, undefined, false],
+      [
+        {
+          ...base,
+          type: "dynamic_tool",
+          toolName: "Grep",
+          input: { pattern: "foo", path: "/repo/src" },
+          readPaths: ["src/i.ts", "src/j.ts"],
+        },
+        { path: "src/i.ts", op: "read" },
+        true,
+      ],
     ];
     for (const [item, touched, touching] of cases) {
       expect(turnItemTouchedFile(item)).toEqual(touched);
       expect(isFileTouchingTurnItem(item)).toBe(touching);
     }
+    expect(
+      cases.map(([item]) => turnItemReadPaths(item)).filter((paths) => paths.length > 0),
+    ).toEqual([
+      ["/repo/src/b.ts"],
+      ["/repo/src/c.ts"],
+      ["/repo/src/d.ts"],
+      ["/repo/src/g.ts", "/repo/src/h.ts"],
+      ["/repo/src/e.ts", "/repo/src/f.ts"],
+      ["src/i.ts", "src/j.ts"],
+    ]);
   });
 
   it("classifies from kind and toolName without sniffing titles", () => {

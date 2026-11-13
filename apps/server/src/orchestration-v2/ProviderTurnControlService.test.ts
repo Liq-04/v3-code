@@ -221,6 +221,7 @@ it.effect(
           readShellSnapshot: () => Effect.die("unused readShellSnapshot"),
           getThreadShell: () => Effect.die("unused getThreadShell"),
           getThreadTitles: () => Effect.die("unused getThreadTitles"),
+          getRunReadPaths: () => Effect.die("unused getRunReadPaths"),
           getThreadLinkMetadata: () => Effect.die("unused getThreadLinkMetadata"),
           findGuestShareThreadId: () => Effect.die("unused findGuestShareThreadId"),
           listLiveDiscussions: () => Effect.die("unused listLiveDiscussions"),

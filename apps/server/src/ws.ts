@@ -2201,6 +2201,17 @@ export const layerWsRpc = (
                 }),
             ),
           ),
+        [ORCHESTRATION_V2_WS_METHODS.getRunReadPaths]: (input) =>
+          threadManagement.getRunReadPaths(input).pipe(
+            Effect.map((paths) => ({ paths })),
+            Effect.mapError(
+              (cause) =>
+                new OrchestrationV2GetShellSnapshotError({
+                  message: "Failed to load the run's read paths",
+                  cause,
+                }),
+            ),
+          ),
         [ORCHESTRATION_V2_WS_METHODS.getOlderSettledThreads]: (input) =>
           loadOlderSettledThreadsPage({
             sql,
@@ -3020,10 +3031,12 @@ export const layerWsRpc = (
                       projectId: input.projectId,
                     }),
                   ),
-                onSome: (project) => projectCodeMap.snapshot(project.workspaceRoot),
+                onSome: (project) => projectCodeMap.snapshot(project.workspaceRoot, input.baseRef),
               }),
             ),
           ),
+        [WS_METHODS.projectsGetCodeMapChanges]: (input) =>
+          projectCodeMap.changes(input.root, input.baseRef),
         [WS_METHODS.projectsListIgnoredFiles]: (input) =>
           workspaceEntries.listIgnoredFiles(input).pipe(
             Effect.mapError(

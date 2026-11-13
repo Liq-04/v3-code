@@ -19,6 +19,7 @@ import {
   OrchestrationV2ThreadShell as ThreadShellSchema,
 } from "@t3tools/contracts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
+import { isFileTouchingTurnItem } from "@t3tools/shared/toolActivity";
 import type * as Arr from "effect/Array";
 import type * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -428,13 +429,13 @@ export function shouldPublishShellApplicationEvent(
     // Replay and the live tail overlap; keep known IDs so late events stay filtered.
     return true;
   }
-  return !(
-    subagentThreadIds.has(event.threadId) &&
-    (event.type === "node.updated" ||
-      event.type === "turn-item.updated" ||
-      event.type === "provider-turn.updated" ||
-      event.type === "message.updated")
-  );
+  if (!subagentThreadIds.has(event.threadId)) return true;
+  // The map still follows a subagent's file and whether its run-less root turn is live.
+  if (event.type === "node.updated") {
+    return event.payload.kind === "root_turn" && event.payload.runId === null;
+  }
+  if (event.type === "turn-item.updated") return isFileTouchingTurnItem(event.payload);
+  return event.type !== "provider-turn.updated" && event.type !== "message.updated";
 }
 
 /** Shell updates refetch an aggregate; drop transcript bodies before retaining an event. */

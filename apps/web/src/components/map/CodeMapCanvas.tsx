@@ -1,3 +1,4 @@
+import * as Schema from "effect/Schema";
 import { threadColor, type CodeMapPathMark } from "@t3tools/client-runtime/state/code-map";
 import type { ThreadId } from "@t3tools/contracts";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
@@ -16,7 +17,8 @@ import {
 } from "./mapCamera";
 import { hitTest, type World, type WorldFile, type WorldFolder, type WorldNode } from "./mapWorld";
 
-export type MapScope = "thread" | "all";
+export const MapScope = Schema.Literals(["thread", "all"]);
+export type MapScope = typeof MapScope.Type;
 
 export interface MarkView {
   readonly path: string;
@@ -50,9 +52,16 @@ export function markView(
   };
 }
 
+export interface ReadView {
+  readonly path: string;
+  readonly threadIds: ReadonlyArray<ThreadId>;
+  readonly strong: boolean;
+}
+
 interface Inputs {
   readonly world: World | null;
   readonly size: Size;
+  readonly reads: ReadonlyArray<ReadView>;
   readonly marks: ReadonlyArray<MarkView>;
   readonly standing: ReadonlyArray<{ readonly path: string; readonly threadId: ThreadId }>;
   readonly hoveredPath: string | null;
@@ -135,6 +144,7 @@ function createPainter() {
     if (!inputs.world) return;
     const scene = { ctx, palette, camera, width, height, charWidths };
     drawChildren(scene, inputs.world.root);
+    for (const read of inputs.reads) drawRead(scene, inputs.world, read);
     for (const mark of inputs.marks) drawMark(scene, inputs.world, mark);
     for (const { path, threadId } of inputs.standing) {
       outline(scene, inputs.world, path, palette.thread(threadId), 2, 1);
@@ -350,6 +360,28 @@ function screenRectAtLeast(scene: Scene, file: WorldFile, minPx: number) {
 const onScreen = (scene: Scene, r: { sx: number; sy: number; sw: number; sh: number }) =>
   r.sx <= scene.width && r.sy <= scene.height && r.sx + r.sw >= 0 && r.sy + r.sh >= 0;
 
+/** An outline and light wash in each reader's colour, split into bands when several threads read it. */
+function drawRead(scene: Scene, world: World, read: ReadView) {
+  const file = world.files.get(read.path);
+  if (!file) return;
+  const r = screenRectAtLeast(scene, file, MIN_MARK_PX);
+  if (!onScreen(scene, r)) return;
+  const { ctx, palette } = scene;
+  const band = r.sw / read.threadIds.length;
+  read.threadIds.forEach((threadId, index) => {
+    const color = palette.thread(threadId);
+    const x = r.sx + index * band;
+    ctx.fillStyle = color;
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = read.strong ? 0.15 : 0.06;
+    ctx.fillRect(x, r.sy, band, r.sh);
+    ctx.globalAlpha = read.strong ? 0.9 : 0.4;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, r.sy + 0.5, band - 1, r.sh - 1);
+  });
+  ctx.globalAlpha = 1;
+}
+
 function drawMark(scene: Scene, world: World, mark: MarkView) {
   const file = world.files.get(mark.path);
   if (!file) return;
@@ -430,6 +462,7 @@ export function CodeMapCanvas(props: CodeMapCanvasProps) {
   const {
     world,
     size,
+    reads,
     marks,
     standing,
     hoveredPath,
@@ -446,9 +479,9 @@ export function CodeMapCanvas(props: CodeMapCanvasProps) {
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the canvas is painted imperatively from these inputs
   useEffect(() => {
-    painter.setInputs({ world, size, marks, standing, hoveredPath, selectedPath });
+    painter.setInputs({ world, size, reads, marks, standing, hoveredPath, selectedPath });
     painter.requestDraw();
-  }, [painter, world, size, marks, standing, hoveredPath, selectedPath]);
+  }, [painter, world, size, reads, marks, standing, hoveredPath, selectedPath]);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes the painter to the camera store and the theme
   useEffect(() => {

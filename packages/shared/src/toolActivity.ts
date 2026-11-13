@@ -206,20 +206,42 @@ export function isFileTouchingTurnItem(
   return (
     item.type === "file_change" ||
     (item.type === "dynamic_tool" && item.toolName === FILE_READ_TOOL_NAME) ||
-    (item.type === "command_execution" && (item.readPaths?.length ?? 0) > 0)
+    ((item.type === "dynamic_tool" || item.type === "command_execution") &&
+      (item.readPaths?.length ?? 0) > 0)
   );
+}
+
+/** The turn items that are a tool call. SQL shell reads filter turn items on these types too. */
+export const TOOL_TURN_ITEM_TYPES = [
+  "command_execution",
+  "dynamic_tool",
+  "file_change",
+  "file_search",
+  "web_search",
+  "subagent",
+] as const satisfies ReadonlyArray<OrchestrationV2TurnItem["type"]>;
+
+const toolTurnItemTypes: ReadonlySet<string> = new Set(TOOL_TURN_ITEM_TYPES);
+
+export const isToolTurnItem = (item: Pick<OrchestrationV2TurnItem, "type">) =>
+  toolTurnItemTypes.has(item.type);
+
+/** Every file a read tool, a search tool, or a shell command named, in the order it named them. */
+export function turnItemReadPaths(item: OrchestrationV2TurnItem): ReadonlyArray<string> {
+  if (item.type === "dynamic_tool" && item.toolName === FILE_READ_TOOL_NAME) {
+    return collectToolFilePaths(item.input);
+  }
+  if (item.type === "dynamic_tool" || item.type === "command_execution") {
+    return item.readPaths ?? [];
+  }
+  return [];
 }
 
 export function turnItemTouchedFile(
   item: OrchestrationV2TurnItem,
 ): { readonly path: string; readonly op: "read" | "edit" } | undefined {
-  if (!isFileTouchingTurnItem(item)) return undefined;
   if (item.type === "file_change") return { path: item.fileName, op: "edit" };
-  if (item.type === "command_execution") {
-    const path = item.readPaths?.[0];
-    return path === undefined ? undefined : { path, op: "read" };
-  }
-  const path = collectToolFilePaths(item.input)[0];
+  const path = turnItemReadPaths(item)[0];
   return path === undefined ? undefined : { path, op: "read" };
 }
 

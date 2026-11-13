@@ -1,4 +1,4 @@
-import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
+import { useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { threadColor, type CodeMapSprite } from "@t3tools/client-runtime/state/code-map";
 import type { ScopedProjectRef, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
@@ -18,15 +18,23 @@ import {
 import { Spinner } from "~/components/ui/spinner";
 import { Toggle } from "~/components/ui/toggle";
 import { Toggle as ScopeToggle, ToggleGroup } from "~/components/ui/toggle-group";
+import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { observeResize } from "~/lib/observeResize";
 import { projectIconColorValue } from "~/projectIconColors";
 import { useRightPanelStore } from "~/rightPanelStore";
-import { codeMapSnapshotAtom, codeMapViewAtom, type CodeMapView } from "~/state/codeMap";
-import { useThreadShell, useThreadShellsForProjectRefs } from "~/state/entities";
+import {
+  codeMapBasesAtom,
+  codeMapSnapshotAtom,
+  codeMapViewAtom,
+  type CodeMapView,
+} from "~/state/codeMap";
+import { useProject, useThreadShell } from "~/state/entities";
 import { buildThreadRouteParams } from "~/threadRoutes";
 
-import { CodeMapCanvas, markView, type MapScope } from "./CodeMapCanvas";
-import { CodeMapSprites, type SpriteInput } from "./CodeMapSprites";
+import { CodeMapBasePicker } from "./CodeMapBasePicker";
+import { CodeMapCanvas, MapScope, markView } from "./CodeMapCanvas";
+import { CodeMapSpriteCard, spriteStatus, threadChanges } from "./CodeMapSpriteCard";
+import { CodeMapSprites, type SpriteHover, type SpriteInput } from "./CodeMapSprites";
 import {
   hoverCodeMapPath,
   useCodeMapFocusStore,
@@ -37,6 +45,7 @@ import { buildWorldTree, layoutWorld, rectOf, type World, type WorldTree } from 
 
 type ReadyView = Extract<CodeMapView, { status: "ready" }>;
 
+const MAP_SCOPE_STORAGE_KEY = "t3code:code-map-scope:v1";
 const LOADING_VIEW = Atom.make<CodeMapView>({ status: "loading" });
 const NO_SIZE: Size = { width: 0, height: 0 };
 const NO_PATHS: ReadonlyMap<ThreadId, string> = new Map();
@@ -59,16 +68,18 @@ export function CodeMapPanel(props: { readonly threadRef: ScopedThreadRef }) {
     );
   }
   if (view.status === "error") {
-    return <CodeMapUnavailable projectRef={projectRef} message={view.message} />;
+    return <CodeMapUnavailable projectRef={projectRef} view={view} />;
   }
   return <CodeMapStage threadRef={threadRef} projectRef={projectRef} view={view} />;
 }
 
 function CodeMapUnavailable(props: {
   readonly projectRef: ScopedProjectRef;
-  readonly message: string;
+  readonly view: Extract<CodeMapView, { status: "error" }>;
 }) {
-  const refresh = useAtomRefresh(codeMapSnapshotAtom(props.projectRef));
+  const { baseKey, chosenBaseRef, message } = props.view;
+  const refresh = useAtomRefresh(codeMapSnapshotAtom(props.projectRef, chosenBaseRef));
+  const setBase = useAtomSet(codeMapBasesAtom);
   return (
     <Empty size="compact" className="min-h-0">
       <EmptyMedia variant="icon">
@@ -76,7 +87,9 @@ function CodeMapUnavailable(props: {
       </EmptyMedia>
       <EmptyHeader>
         <EmptyTitle>Map unavailable</EmptyTitle>
-        <EmptyDescription>{props.message}</EmptyDescription>
+        <EmptyDescription>
+          {chosenBaseRef === null ? message : `${message} The map's base is ${chosenBaseRef}.`}
+        </EmptyDescription>
       </EmptyHeader>
       <button
         type="button"
@@ -85,6 +98,15 @@ function CodeMapUnavailable(props: {
       >
         Try again
       </button>
+      {chosenBaseRef === null ? null : (
+        <button
+          type="button"
+          className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+          onClick={() => setBase({ baseKey, baseRef: null })}
+        >
+          Use the default branch
+        </button>
+      )}
     </Empty>
   );
 }
@@ -108,12 +130,15 @@ function toSpriteInput(
   return {
     threadId: sprite.threadId,
     path: sprite.path,
+    home: sprite.home,
     verb: verbOf(sprite.op),
     kind: sprite.kind,
     parentThreadId: sprite.parentThreadId,
     color: colorOf(sprite.colorThreadId),
     quiet: scope === "thread" && sprite.threadId !== threadId && sprite.colorThreadId !== threadId,
     title: titleOf(sprite.threadId),
+    state: sprite.state,
+    idleSince: sprite.idleSince,
   };
 }
 
@@ -141,19 +166,19 @@ function CodeMapStage(props: {
   const { threadRef, view } = props;
   const { model } = view;
   const router = useRouter();
-  const shells = useThreadShellsForProjectRefs([props.projectRef]);
+  const project = useProject(props.projectRef);
   const selectedPath = useSelectedCodeMapPath(threadRef);
   const hoveredPath = useCodeMapFocusStore((state) => state.hoveredPath);
-  const [scope, setScope] = useState<MapScope>("thread");
+  const [scope, setScope] = useLocalStorage(MAP_SCOPE_STORAGE_KEY, "thread", MapScope);
   const [follow, setFollow] = useState(false);
   const [camera] = useState(() => createCameraStore(HOME_CAMERA));
   const [box, setBox] = useState(NO_SIZE);
   const [layoutBox, setLayoutBox] = useState(NO_SIZE);
   const [cache, setCache] = useState<WorldCache | null>(null);
   const [standingByThread, setStandingByThread] = useState(NO_PATHS);
+  const [spriteHover, setSpriteHover] = useState<SpriteHover | null>(null);
 
-  const titleOf = (threadId: ThreadId) =>
-    shells.find((shell) => shell.id === threadId)?.title || "Untitled thread";
+  const titleOf = (threadId: ThreadId) => view.threadTitles.get(threadId) || "Untitled thread";
 
   const observeBox = (element: HTMLDivElement | null) => {
     if (!element) return;
@@ -211,6 +236,10 @@ function CodeMapStage(props: {
     markView(mark, threadRef.threadId, scope, finished, titleOf),
   );
   const marksByPath = new Map(marks.map((mark) => [mark.path, mark]));
+  const reads = model.reads.map((read) => ({
+    ...read,
+    strong: scope === "all" || read.threadIds.includes(threadRef.threadId),
+  }));
   const sprites = model.sprites.map((sprite) =>
     toSpriteInput(sprite, threadRef.threadId, scope, titleOf),
   );
@@ -219,13 +248,21 @@ function CodeMapStage(props: {
     return path ? [{ path, threadId: sprite.colorThreadId }] : [];
   });
 
+  const hoveredSprite = spriteHover
+    ? model.sprites.find((sprite) => sprite.threadId === spriteHover.threadId)
+    : undefined;
+
+  const openThread = (threadId: ThreadId) => {
+    void router.navigate({
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(scopeThreadRef(threadRef.environmentId, threadId)),
+    });
+  };
+
   const open = (path: string) => {
     const mark = marksByPath.get(path);
     if (mark && mark.kind === "other") {
-      void router.navigate({
-        to: "/$environmentId/$threadId",
-        params: buildThreadRouteParams(scopeThreadRef(threadRef.environmentId, mark.threadId)),
-      });
+      openThread(mark.threadId);
       return;
     }
     useRightPanelStore.getState().openFile(threadRef, path);
@@ -239,9 +276,15 @@ function CodeMapStage(props: {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center gap-1.5 px-2 pt-2 pb-1.5 text-2xs">
-        <span className="truncate font-mono text-muted-foreground">
-          {view.baseRef} · {view.treeSha.slice(0, 7)}
-        </span>
+        <CodeMapBasePicker
+          environmentId={threadRef.environmentId}
+          cwd={project?.workspaceRoot ?? null}
+          baseKey={view.baseKey}
+          baseRef={view.baseRef}
+          treeSha={view.treeSha}
+          defaultBaseRef={view.defaultBaseRef}
+          chosenBaseRef={view.chosenBaseRef}
+        />
         <Button variant="ghost-muted" size="xs" className="ml-auto" onClick={fit}>
           Fit
         </Button>
@@ -274,6 +317,7 @@ function CodeMapStage(props: {
           world={world}
           size={box}
           camera={camera}
+          reads={reads}
           marks={marks}
           standing={standing}
           hoveredPath={hoveredPath}
@@ -282,7 +326,26 @@ function CodeMapStage(props: {
           onHover={hoverCodeMapPath}
           onManualPanZoom={() => setFollow(false)}
         />
-        <CodeMapSprites sprites={sprites} world={world} camera={camera} />
+        <CodeMapSprites
+          sprites={sprites}
+          world={world}
+          camera={camera}
+          onHover={setSpriteHover}
+          onOpen={openThread}
+        />
+        {spriteHover && hoveredSprite ? (
+          <CodeMapSpriteCard
+            anchor={spriteHover.rect}
+            bounds={box}
+            title={titleOf(hoveredSprite.threadId)}
+            projectName={view.threadProjectNames.get(hoveredSprite.threadId) ?? null}
+            status={spriteStatus(hoveredSprite)}
+            changes={threadChanges(model.marks, hoveredSprite.threadId)}
+            parentTitle={
+              hoveredSprite.parentThreadId === null ? null : titleOf(hoveredSprite.parentThreadId)
+            }
+          />
+        ) : null}
       </div>
     </div>
   );

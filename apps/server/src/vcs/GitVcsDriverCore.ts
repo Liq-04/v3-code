@@ -2327,7 +2327,14 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           ? readBranchChangeTotals(repositoryPaths?.worktreeRoot ?? cwd, refName, {
               knownOriginDefaultBranch: defaultBranch,
               untrackedRoots,
-            }).pipe(Effect.orElseSucceed(() => undefined))
+            }).pipe(
+              Effect.map(({ baseRef, insertions, deletions }) => ({
+                baseRef,
+                insertions,
+                deletions,
+              })),
+              Effect.orElseSucceed(() => undefined),
+            )
           : Effect.undefined,
       ],
       { concurrency: "unbounded" },
@@ -3214,14 +3221,16 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     cwd: string,
     branch: string | null,
     options?: {
-      readonly knownOriginDefaultBranch: string | null;
-      readonly untrackedRoots: ReadonlyArray<string>;
+      readonly knownOriginDefaultBranch?: string | null;
+      readonly untrackedRoots?: ReadonlyArray<string>;
+      /** Compares against this ref instead of the branch's own review base. */
+      readonly baseRef?: string;
     },
   ) {
     const resolved = yield* resolveReviewMergeBase(
       cwd,
       branch,
-      undefined,
+      options?.baseRef,
       options?.knownOriginDefaultBranch ?? null,
     );
     // A rename after `git status` read HEAD moves the base config away, so the base was guessed.
@@ -5123,6 +5132,10 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       return yield* withListRefsInvalidation(cwd, pullCurrentBranch(cwd));
     }),
     readRangeContext,
+    readBranchChanges: Effect.fnUntraced(function* (cwd, baseRef) {
+      const { files, filesTotal } = yield* readBranchChangeTotals(cwd, null, { baseRef });
+      return { files, filesTotal };
+    }),
     getReviewBranchCommits,
     getReviewDiffPreview,
     getReviewDiffFileContents,

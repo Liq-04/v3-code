@@ -242,17 +242,6 @@ const VcsStatusLocalShape = {
       baseRef: Schema.NullOr(TrimmedNonEmptyStringSchema),
       insertions: NonNegativeInt,
       deletions: NonNegativeInt,
-      // Largest changes first, capped; paths are relative to workingTree.rootPath.
-      files: Schema.optional(
-        Schema.Array(
-          Schema.Struct({
-            path: GitFilePath,
-            insertions: NonNegativeInt,
-            deletions: NonNegativeInt,
-          }),
-        ),
-      ),
-      filesTotal: Schema.optional(NonNegativeInt),
     }),
   ),
 };

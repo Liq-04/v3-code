@@ -656,45 +656,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   }
 }
 
-@utility code-map-walk {
-  animation: code-map-step 0.26s ease-in-out infinite alternate;
-
-  @media (prefers-reduced-motion: reduce) {
-    animation: none;
-  }
-}
-
-@utility code-map-land {
-  animation: code-map-land 0.35s ease-out;
-
-  @media (prefers-reduced-motion: reduce) {
-    animation: none;
-  }
-}
-
 @utility code-map-say {
   animation: code-map-say 1.6s linear forwards;
-}
-
-@keyframes code-map-step {
-  from {
-    transform: translateY(0) rotate(-4deg);
-  }
-  to {
-    transform: translateY(-3px) rotate(4deg);
-  }
-}
-
-@keyframes code-map-land {
-  0% {
-    transform: scale(1.15, 0.8);
-  }
-  60% {
-    transform: scale(0.95, 1.06);
-  }
-  100% {
-    transform: none;
-  }
 }
 
 @keyframes code-map-say {
@@ -704,6 +667,246 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   }
   100% {
     opacity: 0;
+  }
+}
+
+.code-map-sprite {
+  --code-map-eye-unit: 1px;
+  --code-map-terminal-reach: 12px;
+  --code-map-eye-look: translate(
+    calc(var(--code-map-look-x, 0) * 1.5 * var(--code-map-eye-unit)),
+    calc(var(--code-map-look-y, 0) * 1.5 * var(--code-map-eye-unit))
+  );
+}
+
+.code-map-sprite[data-kind="subagent"] {
+  --code-map-eye-unit: 0.6px;
+  --code-map-terminal-reach: 8px;
+}
+
+.code-map-shadow {
+  position: absolute;
+  bottom: -3px;
+  left: 2px;
+  z-index: -1;
+  width: 22px;
+  height: 6px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--foreground) 20%, transparent);
+}
+
+.code-map-sprite[data-kind="subagent"] .code-map-shadow {
+  bottom: -2px;
+  left: 1px;
+  width: 13px;
+  height: 4px;
+}
+
+.code-map-eye {
+  width: 4.5px;
+  height: 7px;
+  border-radius: 2.5px;
+  background: #14241c;
+  transform-origin: 50% 55%;
+  transition: transform 180ms ease-out;
+}
+
+.code-map-sprite[data-kind="subagent"] .code-map-eye {
+  width: 2.5px;
+  height: 4px;
+  border-radius: 1.5px;
+}
+
+.code-map-sprite[data-state="thinking"] .code-map-eye {
+  transform: translate(var(--code-map-eye-unit), calc(var(--code-map-eye-unit) * -1.5));
+}
+
+.code-map-sprite[data-state="working"] .code-map-eye {
+  transform: translate(calc(var(--code-map-eye-unit) * 1.4), calc(var(--code-map-eye-unit) * 0.5))
+    scaleY(0.8);
+}
+
+.code-map-sprite[data-state="thinking"][data-busy] .code-map-eye {
+  transform: translateY(var(--code-map-eye-unit)) scaleY(0.72);
+}
+
+.code-map-sprite[data-state="waiting"] .code-map-eye {
+  transform: scale(1.14);
+}
+
+.code-map-sprite[data-state="idle"] .code-map-eye {
+  transform: scaleY(0.14);
+}
+
+/* A walking sprite looks where it goes, and the eye on the far side narrows. */
+.code-map-sprite[data-look]:not([data-state="idle"]) .code-map-eye {
+  transform: var(--code-map-eye-look);
+}
+
+.code-map-sprite[data-look="left"]:not([data-state="idle"]) .code-map-eye:last-of-type,
+.code-map-sprite[data-look="right"]:not([data-state="idle"]) .code-map-eye:first-of-type {
+  transform: var(--code-map-eye-look) scaleX(0.82);
+}
+
+.code-map-sprite[data-done] .code-map-eye {
+  animation: code-map-eye-happy 600ms ease-out;
+}
+
+@keyframes code-map-eye-happy {
+  0%,
+  80% {
+    height: 4px;
+    border-radius: 4px 4px 1px 1px;
+    transform: translateY(-1px);
+  }
+}
+
+.code-map-cloud {
+  position: absolute;
+  top: -28px;
+  left: 17px;
+  width: 36px;
+  height: 31px;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: scale(0.6);
+  transform-origin: 0 100%;
+  transition:
+    opacity 160ms ease-out,
+    transform 160ms ease-out,
+    visibility 160ms;
+}
+
+.code-map-sprite[data-kind="subagent"] .code-map-cloud {
+  top: -29px;
+  left: 10px;
+  scale: 0.6;
+}
+
+.code-map-sprite[data-state="thinking"]:not([data-busy]) .code-map-cloud {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+}
+
+.code-map-cloud > span {
+  position: absolute;
+  background: var(--popover);
+  box-shadow:
+    0 0 0 1px var(--border),
+    0 2px 5px rgb(0 0 0 / 18%);
+}
+
+.code-map-cloud > span:nth-child(1) {
+  top: 27px;
+  left: 0;
+  width: 3.5px;
+  height: 3.5px;
+  border-radius: 1px;
+}
+
+.code-map-cloud > span:nth-child(2) {
+  top: 19px;
+  left: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+}
+
+.code-map-cloud > span:nth-child(3) {
+  top: 0;
+  left: 6px;
+  display: flex;
+  width: 30px;
+  height: 17px;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border-radius: 7px 7px 7px 3px;
+}
+
+.code-map-cloud i {
+  width: 4px;
+  height: 5px;
+  border-radius: 1.5px;
+  background: var(--code-map-color);
+  opacity: 0.28;
+  transition:
+    opacity 120ms,
+    transform 120ms;
+}
+
+.code-map-cloud i[data-lit] {
+  opacity: 1;
+  transform: translateY(-1px);
+}
+
+.code-map-terminal {
+  position: absolute;
+  top: 5px;
+  left: 25px;
+  width: 15px;
+  height: 12px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: #2b3a33;
+  box-shadow:
+    0 0 0 1.5px var(--background),
+    inset 0 0 0 1px #46584f;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 160ms ease-out,
+    visibility 160ms;
+}
+
+.code-map-sprite[data-kind="subagent"] .code-map-terminal {
+  top: 2.8px;
+  left: 14.7px;
+  scale: 0.6;
+  transform-origin: 0 0;
+}
+
+.code-map-sprite[data-state="working"] .code-map-terminal {
+  opacity: 1;
+  visibility: visible;
+}
+
+.code-map-terminal-line,
+.code-map-terminal-cursor {
+  position: absolute;
+  left: 2px;
+  height: 1.2px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--code-map-color) 70%, #eaf6ec);
+}
+
+.code-map-terminal-cursor {
+  top: 7.5px;
+  width: 2px;
+  height: 3px;
+}
+
+.code-map-terminal[data-blink] .code-map-terminal-cursor {
+  opacity: 0;
+}
+
+.code-map-sprite[data-state="working"] .code-map-say {
+  translate: var(--code-map-terminal-reach) 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .code-map-eye,
+  .code-map-cloud,
+  .code-map-cloud i,
+  .code-map-terminal {
+    transition: none;
+  }
+
+  .code-map-sprite[data-done] .code-map-eye {
+    animation: none;
   }
 }
 

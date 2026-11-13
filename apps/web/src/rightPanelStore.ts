@@ -81,7 +81,7 @@ export type RightPanelSurface =
   | { id: "map"; kind: "map" };
 
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
-const RIGHT_PANEL_STORAGE_VERSION = 14;
+const RIGHT_PANEL_STORAGE_VERSION = 15;
 
 export const PULL_REQUESTS_PANEL_REF = scopeThreadRef(
   EnvironmentId.make("pull-requests-panel"),
@@ -106,6 +106,13 @@ export interface ThreadPanelVisibility {
 
 interface RightPanelStoreState {
   byThreadKey: Record<string, ThreadRightPanelState>;
+  /**
+   * The Map tab follows the operator into every thread. Showing the map pins it; closing its tab,
+   * or collapsing the panel while it shows, unpins it and takes it out of the other threads.
+   */
+  mapPinned: boolean;
+  /** Arriving at a thread: its panel opens on the pinned map. */
+  revealPinnedMap: (ref: ScopedThreadRef) => void;
   pendingMaximizeThreadKey: string | null;
   requestMaximize: (ref: ScopedThreadRef) => void;
   consumeMaximizeRequest: (ref: ScopedThreadRef) => boolean;
@@ -353,6 +360,53 @@ type RightPanelStoreData = Pick<
   "byThreadKey" | "threadPanelVisibilityByThreadKey"
 >;
 
+const MAP_SURFACE_ID = "map";
+const hasMap = (thread: ThreadRightPanelState) =>
+  thread.surfaces.some((surface) => surface.id === MAP_SURFACE_ID);
+const showsMap = (thread: ThreadRightPanelState) =>
+  thread.isOpen && thread.activeSurfaceId === MAP_SURFACE_ID;
+
+function withoutSurface(current: ThreadRightPanelState, surfaceId: string): ThreadRightPanelState {
+  const index = current.surfaces.findIndex((surface) => surface.id === surfaceId);
+  if (index < 0) return current;
+  const surfaces = current.surfaces.filter((surface) => surface.id !== surfaceId);
+  const next = { ...current, isOpen: surfaces.length > 0 && current.isOpen, surfaces };
+  if (current.activeSurfaceId !== surfaceId) return next;
+  const fallback = surfaces[Math.min(index, surfaces.length - 1)] ?? null;
+  return { ...next, activeSurfaceId: fallback?.id ?? null };
+}
+
+/** Whether the map is pinned after a user action took one thread's panel from `current` to `next`. */
+function mapPinnedAfter(
+  pinned: boolean,
+  current: ThreadRightPanelState,
+  next: ThreadRightPanelState,
+): boolean {
+  if (showsMap(next)) return true;
+  const closedMapTab = hasMap(current) && !hasMap(next);
+  const collapsedOnMap = showsMap(current) && !next.isOpen;
+  return closedMapTab || collapsedOnMap ? false : pinned;
+}
+
+// A thread whose active tab was the map falls back to its last remaining tab: the store does
+// not record which tab was used most recently. A panel left with no tab collapses.
+function removeMapFromOtherThreads(
+  data: RightPanelStoreData,
+  exceptThreadKey: string,
+): RightPanelStoreData {
+  let next = data;
+  for (const [threadKey, thread] of Object.entries(data.byThreadKey)) {
+    if (threadKey === exceptThreadKey || !hasMap(thread)) continue;
+    next = updateThread(next, threadKey, (current) => {
+      const stripped = withoutSurface(current, MAP_SURFACE_ID);
+      return current.activeSurfaceId === MAP_SURFACE_ID
+        ? { ...stripped, activeSurfaceId: stripped.surfaces.at(-1)?.id ?? null }
+        : stripped;
+    });
+  }
+  return next;
+}
+
 const updateThread = (
   state: RightPanelStoreData,
   threadKey: string,
@@ -424,8 +478,8 @@ const userActionOnThread = (
   threadKey: string,
   updater: (current: ThreadRightPanelState) => ThreadRightPanelState,
   closesView: boolean,
-): Partial<RightPanelStoreState> => ({
-  ...updateThread(state, threadKey, (current) => {
+): Partial<RightPanelStoreState> => {
+  const data = updateThread(state, threadKey, (current) => {
     const next = updater(current);
     if (next === current) return current;
     const removedDevices = current.surfaces.filter(
@@ -442,20 +496,29 @@ const userActionOnThread = (
         ]),
       ],
     };
-  }),
-  userActionRevisionByThreadKey: {
-    ...state.userActionRevisionByThreadKey,
-    [threadKey]: (state.userActionRevisionByThreadKey[threadKey] ?? 0) + 1,
-  },
-  ...(closesView
-    ? {
-        closeRevisionByThreadKey: {
-          ...state.closeRevisionByThreadKey,
-          [threadKey]: (state.closeRevisionByThreadKey[threadKey] ?? 0) + 1,
-        },
-      }
-    : {}),
-});
+  });
+  const mapPinned = mapPinnedAfter(
+    state.mapPinned,
+    state.byThreadKey[threadKey] ?? EMPTY_THREAD_STATE,
+    data.byThreadKey[threadKey] ?? EMPTY_THREAD_STATE,
+  );
+  return {
+    ...(state.mapPinned && !mapPinned ? removeMapFromOtherThreads(data, threadKey) : data),
+    mapPinned,
+    userActionRevisionByThreadKey: {
+      ...state.userActionRevisionByThreadKey,
+      [threadKey]: (state.userActionRevisionByThreadKey[threadKey] ?? 0) + 1,
+    },
+    ...(closesView
+      ? {
+          closeRevisionByThreadKey: {
+            ...state.closeRevisionByThreadKey,
+            [threadKey]: (state.closeRevisionByThreadKey[threadKey] ?? 0) + 1,
+          },
+        }
+      : {}),
+  };
+};
 
 const activated = (current: ThreadRightPanelState, surfaceId: string): ThreadRightPanelState =>
   current.surfaces.some((surface) => surface.id === surfaceId)
@@ -476,6 +539,7 @@ function normalizeRevealLine(line: number | undefined): number | null {
 export function migratePersistedRightPanelState(persistedState: unknown): {
   byThreadKey: Record<string, ThreadRightPanelState>;
   threadPanelVisibilityByThreadKey: Record<string, ThreadPanelVisibility>;
+  mapPinned?: true;
 } {
   if (!persistedState || typeof persistedState !== "object") {
     return { byThreadKey: {}, threadPanelVisibilityByThreadKey: {} };
@@ -622,13 +686,28 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
           }),
         )
       : {};
-  return { byThreadKey, threadPanelVisibilityByThreadKey };
+  return {
+    byThreadKey,
+    threadPanelVisibilityByThreadKey,
+    ...("mapPinned" in persistedState && persistedState.mapPinned === true
+      ? { mapPinned: true as const }
+      : {}),
+  };
 }
 
 export const useRightPanelStore = create<RightPanelStoreState>()(
   persist(
     (set, get) => ({
       byThreadKey: {},
+      mapPinned: false,
+      revealPinnedMap: (ref) =>
+        set((state) =>
+          state.mapPinned
+            ? automaticUpdate(state, scopedThreadKey(ref), (current) =>
+                showsMap(current) ? current : upsertSurface(current, singletonSurface("map")),
+              )
+            : state,
+        ),
       pendingMaximizeThreadKey: null,
       requestMaximize: (ref) => set({ pendingMaximizeThreadKey: scopedThreadKey(ref) }),
       consumeMaximizeRequest: (ref) => {
@@ -655,6 +734,9 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
         let opened = false;
         set((state) => {
           const threadKey = scopedThreadKey(ref);
+          // The operator pinned the map to keep it in view; an offer must not take its place.
+          const pinnedMapShows =
+            state.mapPinned && showsMap(selectThreadRightPanelState(state.byThreadKey, ref));
           if (request.kind === "diff") {
             const current = selectThreadRightPanelState(state.byThreadKey, ref);
             if (current.proactiveDiffTurnId === request.turnId) return state;
@@ -665,7 +747,8 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               (state.userActionRevisionByThreadKey[threadKey] ?? 0) ===
                 expectedUserActionRevision &&
               activePanel !== "diff" &&
-              !pullRequestActive;
+              !pullRequestActive &&
+              !pinnedMapShows;
             // Record the offer even when refused, so a revisit does not retry this turn.
             return automaticUpdate(state, threadKey, (thread) => ({
               ...(opened ? upsertSurface(thread, singletonSurface("diff")) : thread),
@@ -673,6 +756,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             }));
           }
           if (
+            pinnedMapShows ||
             (state.userActionRevisionByThreadKey[threadKey] ?? 0) !== expectedUserActionRevision
           ) {
             return state;
@@ -947,24 +1031,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
         ),
       closeSurface: (ref, surfaceId) =>
         set((state) =>
-          closeAction(state, scopedThreadKey(ref), (current) => {
-            const index = current.surfaces.findIndex((surface) => surface.id === surfaceId);
-            if (index < 0) return current;
-            const surfaces = current.surfaces.filter((surface) => surface.id !== surfaceId);
-            const next = {
-              ...current,
-              isOpen: surfaces.length > 0 && current.isOpen,
-              surfaces,
-            };
-            if (current.activeSurfaceId !== surfaceId) {
-              return next;
-            }
-            const fallback = surfaces[Math.min(index, surfaces.length - 1)] ?? null;
-            return {
-              ...next,
-              activeSurfaceId: fallback?.id ?? null,
-            };
-          }),
+          closeAction(state, scopedThreadKey(ref), (current) => withoutSurface(current, surfaceId)),
         ),
       closeOtherSurfaces: (ref, surfaceId) =>
         set((state) =>
@@ -1167,6 +1234,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
         resolveStorage(typeof window !== "undefined" ? window.localStorage : undefined),
       ),
       partialize: (state) => ({
+        mapPinned: state.mapPinned,
         byThreadKey: Object.fromEntries(
           Object.entries(state.byThreadKey).filter(
             ([threadKey]) => !isPullRequestsPanelKey(threadKey),

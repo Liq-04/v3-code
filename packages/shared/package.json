@@ -123,6 +123,10 @@
       "types": "./src/schemaYaml.ts",
       "import": "./src/schemaYaml.ts"
     },
+    "./shellReads": {
+      "types": "./src/shellReads.ts",
+      "import": "./src/shellReads.ts"
+    },
     "./toolActivity": {
       "types": "./src/toolActivity.ts",
       "import": "./src/toolActivity.ts"

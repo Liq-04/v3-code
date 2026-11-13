@@ -186,6 +186,8 @@ describe("ProjectCodeMapSnapshot", () => {
     const snapshot = {
       treeSha: "abc123",
       baseRef: "main",
+      defaultBaseRef: "main",
+      checkouts: ["/repo", "/repo-worktrees/feature"],
       files: { paths: ["src/a.ts", "logo.png"], lines: [12, 0], vendored: [false, true] },
       folders: [{ path: "src", fileCount: 1, lines: 12 }],
       filesTotal: 2,
