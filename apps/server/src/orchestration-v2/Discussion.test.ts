@@ -130,6 +130,7 @@ it.effect("starts one call, ends it idempotently and enqueues the summary once",
     assert.equal(liveItem?.discussionStatus, "live");
     // The live item follows the newest run's items so it lands at the end of the timeline.
     assert.equal(liveItem?.runId, started.runs[0]?.id);
+    assert.equal((yield* projections.getThreadShell(threadId))?.discussion?.id, discussionId);
 
     assert.isTrue(
       Exit.isFailure(
@@ -139,6 +140,7 @@ it.effect("starts one call, ends it idempotently and enqueues the summary once",
 
     yield* end(orchestrator, "end-1");
     assert.isNull((yield* projections.getThread(threadId)).discussion);
+    assert.isNull((yield* projections.getThreadShell(threadId))?.discussion);
     assert.equal((yield* discussionItem)?.discussionStatus, "ended");
     const ended = yield* summaryEffects("end-1");
     assert.lengthOf(ended, 1);

@@ -17,6 +17,7 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell
 import { canSnooze, resolveSnoozePresets } from "@t3tools/client-runtime/state/thread-settled";
 import {
   CommandId,
+  DiscussionId,
   EnvironmentId,
   MessageId,
   OrchestrationV2ThreadShell,
@@ -173,6 +174,34 @@ describe("resolveThreadListV2Status", () => {
     expect(resolveThreadListV2Status(present({ ...raw, blockedOnThreadWait: false }))).toBe(
       "working",
     );
+  });
+
+  it("shows a live call as On a call, whether or not a turn runs, after approvals and input", () => {
+    const thread = presentThreadShell(
+      environmentId,
+      decodeThreadShell(
+        makeRawThreadShell({
+          status: "running",
+          activeRunId: RunId.make("run-call"),
+          latestRunId: RunId.make("run-call"),
+        }),
+      ),
+    );
+    const call = {
+      ...thread,
+      discussion: {
+        id: DiscussionId.make("discussion:call"),
+        startedAt: "2026-06-01T00:00:00.000Z",
+        heldBy: "desktop",
+      },
+    };
+
+    expect(resolveThreadListV2Status(call)).toBe("call");
+    expect(resolveThreadListV2Status({ ...call, runtime: null })).toBe("call");
+    expect(resolveThreadListV2Status({ ...call, pendingGuestMessageCount: 1 })).toBe("call");
+    expect(resolveThreadListV2Status({ ...call, hasPendingUserInput: true })).toBe("input");
+    expect(resolveThreadListV2Status({ ...call, hasPendingApprovals: true })).toBe("approval");
+    expect(resolveThreadListV2Status({ ...call, discussion: null })).toBe("working");
   });
 
   it("shows a waiting guest message as Request, after the agent's own requests", () => {

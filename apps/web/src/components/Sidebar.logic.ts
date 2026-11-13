@@ -646,6 +646,7 @@ export interface ThreadStatusPill {
     | "Failed"
     | "Pending Approval"
     | "Awaiting Input"
+    | "On a call"
     | "Guest Request"
     | "Waiting"
     | "Plan Ready";
@@ -661,6 +662,7 @@ type ThreadStatusInput = Pick<
   | "hasPendingUserInput"
   | "pendingSubagentRequest"
   | "pendingGuestMessageCount"
+  | "discussion"
   | "interactionMode"
   | "latestRun"
   | "runtime"
@@ -856,6 +858,7 @@ type SidebarThreadStatusInput = Pick<
   | "pendingGuestMessageCount"
   | "runtime"
   | "blockedOnThreadWait"
+  | "discussion"
 >;
 
 export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): SidebarThreadStatus {
@@ -869,6 +872,8 @@ export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): Si
   if ((thread.pendingGuestMessageCount ?? 0) > 0) {
     return "request";
   }
+  // Between a call's turns the thread is still busy: it must not recede or notify per reply.
+  if (thread.discussion != null) return "working";
   if (thread.runtime?.status === "running" && thread.blockedOnThreadWait === true) {
     return "waiting";
   }
@@ -1107,6 +1112,16 @@ export function resolveThreadStatusPill(input: {
       label: "Awaiting Input",
       colorClass: "text-indigo-600 dark:text-indigo-300/90",
       dotClass: "bg-indigo-500 dark:bg-indigo-300/90",
+      pulse: false,
+    };
+  }
+
+  // The call's turns start and stop, so the thread says it is on a call instead of flickering.
+  if (thread.discussion != null) {
+    return {
+      label: "On a call",
+      colorClass: "text-pink-600 dark:text-pink-300/90",
+      dotClass: "bg-pink-500 dark:bg-pink-300/90",
       pulse: false,
     };
   }

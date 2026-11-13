@@ -8,7 +8,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
-import { discussionTranscript } from "./transcript.ts";
+import { discussionTranscript, discussionTranscriptEntries } from "./transcript.ts";
 
 const call = DiscussionId.make("discussion-1");
 const otherCall = DiscussionId.make("discussion-2");
@@ -73,6 +73,42 @@ describe("discussionTranscript", () => {
       ["reply-1", "agent", "Keeping the old API."],
       ["line-2", "user", "Run the tests."],
       ["reply-2", "agent", "Tests pass."],
+    ]);
+  });
+});
+
+describe("discussionTranscriptEntries", () => {
+  it("puts each run of tool work between the lines it happened between", () => {
+    const lines = discussionTranscript(
+      [
+        message("line-1", "user", 10, "run-1", "framed", { discussionId: call, spoken: "Hi" }),
+        message("reply-1", "assistant", 20, "run-1", "Checking."),
+        message("reply-2", "assistant", 40, "run-1", "Done."),
+      ],
+      call,
+    );
+    const work = (id: string, second: number) => ({
+      id,
+      createdAt: DateTime.formatIso(DateTime.makeUnsafe(second * 1_000)),
+    });
+    const entries = discussionTranscriptEntries(lines, [
+      work("tool-c", 30),
+      work("tool-a", 21),
+      work("tool-b", 22),
+      work("tool-d", 50),
+      work("tool-tie", 10),
+    ]);
+    expect(
+      entries.map((entry) =>
+        entry.kind === "line" ? entry.line.messageId : entry.entries.map(({ id }) => id),
+      ),
+    ).toEqual([
+      "line-1",
+      ["tool-tie"],
+      "reply-1",
+      ["tool-a", "tool-b", "tool-c"],
+      "reply-2",
+      ["tool-d"],
     ]);
   });
 });

@@ -102,6 +102,12 @@ const STATUS_LABEL_BY_STATUS: Partial<Record<ThreadListV2Status, StatusLabel>> =
     className: "text-adaptive-indigo-600-300",
     iconTintClassName: "accent-adaptive-indigo-600-300",
   },
+  call: {
+    label: "On a call",
+    icon: "bubble.left.and.bubble.right",
+    className: "text-adaptive-pink-600-300",
+    iconTintClassName: "accent-adaptive-pink-600-300",
+  },
   request: {
     label: "Request",
     icon: "person.crop.circle",

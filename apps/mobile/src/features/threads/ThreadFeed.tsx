@@ -209,6 +209,7 @@ import {
   isDiscussionActivityGroup,
   isLinkRequestActivityGroup,
   isSecretRequestActivityGroup,
+  type ThreadFeedActivity,
   type ThreadFeedEntry,
   type ThreadFeedLatestRun,
   messageFoldRunId,
@@ -1701,6 +1702,39 @@ function renderFeedEntry(
   const entry = info.item;
   const { markdownStyles, iconSubtleColor, userBubbleColor } = props;
 
+  const renderWorkLog = (
+    activities: ReadonlyArray<ThreadFeedActivity>,
+    anchorKey: string,
+    continuesWorkLog?: boolean,
+    disclosureAnchorKey?: string,
+  ) => (
+    <ThreadWorkLog
+      key={`${anchorKey}:${props.workRowSizing.textSizeKey}`}
+      activities={activities}
+      continuesWorkLog={continuesWorkLog}
+      environmentId={props.environmentId}
+      workspaceRoot={props.workspaceRoot}
+      anchorKey={anchorKey}
+      copiedRowId={props.copiedRowId}
+      expandedRows={props.expandedWorkRows}
+      rowSizing={props.workRowSizing}
+      scrollPositions={props.workGroupScrollPositions}
+      iconSubtleColor={iconSubtleColor}
+      edgeFadeColor={props.screenColor}
+      themeAppearance={props.themeAppearance}
+      onCopyRow={props.onCopyWorkRow}
+      onToggleRow={
+        disclosureAnchorKey === undefined
+          ? props.onToggleWorkRow
+          : (rowId, _anchorKey, groupId) =>
+              props.onToggleWorkRow(rowId, disclosureAnchorKey, groupId)
+      }
+      renderImage={props.renderViewedImage}
+      renderReasoning={props.renderReasoning}
+      onPressPreview={props.onPressPreview}
+    />
+  );
+
   if (entry.type === "guest-pending") {
     return (
       <ThreadGuestPendingMessage
@@ -1835,6 +1869,13 @@ function renderFeedEntry(
       <DiscussionCard
         environmentId={props.environmentId}
         projectedItem={entry.activities[0]!.projectedItem}
+        callWork={entry.activities[0]!.callWork ?? NO_CALL_WORK}
+        work={{
+          isExpanded: (key) => props.expandedWorkRows[key] ?? false,
+          toggle: (key) => props.onToggleWorkRow(key, entry.id),
+          // A card holds several runs; their rows toggle against the card, which is the feed row.
+          render: (activities, key) => renderWorkLog(activities, key, undefined, entry.id),
+        }}
         iconColor={iconSubtleColor}
       />
     );
@@ -2319,29 +2360,10 @@ function renderFeedEntry(
     );
   }
 
-  return (
-    <ThreadWorkLog
-      key={`${entry.id}:${props.workRowSizing.textSizeKey}`}
-      activities={entry.activities}
-      continuesWorkLog={entry.continuesWorkLog}
-      environmentId={props.environmentId}
-      workspaceRoot={props.workspaceRoot}
-      anchorKey={entry.id}
-      copiedRowId={props.copiedRowId}
-      expandedRows={props.expandedWorkRows}
-      rowSizing={props.workRowSizing}
-      scrollPositions={props.workGroupScrollPositions}
-      iconSubtleColor={iconSubtleColor}
-      edgeFadeColor={props.screenColor}
-      themeAppearance={props.themeAppearance}
-      onCopyRow={props.onCopyWorkRow}
-      onToggleRow={props.onToggleWorkRow}
-      renderImage={props.renderViewedImage}
-      renderReasoning={props.renderReasoning}
-      onPressPreview={props.onPressPreview}
-    />
-  );
+  return renderWorkLog(entry.activities, entry.id, entry.continuesWorkLog);
 }
+
+const NO_CALL_WORK: never[] = [];
 
 function TurnDiffStat(props: {
   readonly checkpoint: ThreadCheckpointSummary;
