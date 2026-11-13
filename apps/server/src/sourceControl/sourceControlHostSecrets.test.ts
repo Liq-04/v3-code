@@ -188,6 +188,7 @@ it.effect("reads a collected reference again once it is invalidated", () =>
           elevenlabs: source("elevenlabs#key"),
         },
         usageLimitSources,
+        textGenerators: {},
         easDeviceHosts,
         simlockDeviceHosts,
       }),
